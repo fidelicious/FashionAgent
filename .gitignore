@@ -4,14 +4,16 @@ secrets/*.key
 *.pem
 
 # --- Runtime data (never commit) ---
-# These dirs only exist on the NUC; this gitignore guards against accidental commits
-# if a user copies them onto the dev machine.
-db/
-images/
-inbox/
-logs/
-backups/
-models/
+# These dirs only exist at the repo root on the NUC; this gitignore guards
+# against accidental commits if a user copies them onto the dev machine.
+# Leading slash anchors to repo root so we don't accidentally exclude
+# legitimate source dirs like src/clawbot/db/.
+/db/
+/images/
+/inbox/
+/logs/
+/backups/
+/models/
 
 # --- Python ---
 __pycache__/
