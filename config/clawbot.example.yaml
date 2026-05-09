@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Clawbot configuration — single source of truth for tunables.
+#
+# Copy to clawbot.yaml on the NUC. The path is set via $CLAWBOT_CONFIG.
+# Do NOT put secrets here; those live in secrets/.env.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Models ─────────────────────────────────────────────────────────────────
+models:
+  llm: "gemma3:1b"                        # Ollama model tag. Upgrade path: qwen2.5:3b
+  embedding: "nomic-embed-text"
+  vision_clip: "patrickjohncyh/fashion-clip"
+  ollama_base_url: "http://ollama:11434"  # overridden by $OLLAMA_BASE_URL if set
+  llm_timeout_seconds: 60                 # 1B on a 2012 CPU is slow; be patient
+  llm_max_retries: 2
+
+# ── Paths (inside the container) ───────────────────────────────────────────
+# These map to host paths via docker-compose volume mounts.
+paths:
+  home: "/data"
+  db_path: "/data/db/clawbot.db"
+  images_dir: "/data/images"
+  inbox_dir: "/data/inbox"
+  logs_dir: "/data/logs"
+  backups_dir: "/data/backups"
+  models_cache_dir: "/data/models"
+
+# ── Image pipeline tuning ──────────────────────────────────────────────────
+image_pipeline:
+  thumbnail_max_px: 512
+  rembg_model: "u2netp"          # smaller/faster than u2net, fine for clothing
+  lazy_load_models: true         # unload Fashion-CLIP between jobs to save RAM
+  fashion_clip_confidence_threshold: 0.55
+  ocr_enabled_for_screenshots: true
+
+# ── Outfit recommendation scoring ──────────────────────────────────────────
+# Weights from the original blueprint. Sum of positives = 100; duplicate is a penalty.
+scoring:
+  style_match: 35
+  compatibility: 25
+  season: 15
+  occasion_match: 15
+  budget_alignment: 10
+  duplicate_penalty: 25
+  candidate_cap: 50              # hard cap on combinations to score per request
+
+# ── Schedule (all times in NUC local TZ) ───────────────────────────────────
+schedule:
+  daily_outfit: "0 7 * * *"      # 07:00 every day
+  nightly_backup: "30 2 * * *"   # 02:30 every day
+  inbox_sweep_seconds: 60        # poll inbox/* every minute
+  disk_check: "0 * * * *"        # every hour
+  db_vacuum: "0 3 * * 0"         # Sunday 03:00
+
+# ── Backup retention ───────────────────────────────────────────────────────
+backup:
+  retain_days: 14
+  include:
+    - "/data/db"
+    - "/data/images"
+  # images/raw/ is large; consider excluding once cutouts are stable
+  exclude_globs: []
+
+# ── Health / safety ────────────────────────────────────────────────────────
+health:
+  disk_warn_pct: 85              # alert when usage exceeds this
+  disk_critical_pct: 95          # halt new ingestion above this
+  llm_required_for_outfits: true # if false, outfits ship without LLM explanation
+
+# ── Logging ────────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"                  # DEBUG / INFO / WARNING / ERROR
+  format: "json"                 # json | console
+  rotation_mb: 50
+  retention_files: 7
+
+# ── Feature flags ──────────────────────────────────────────────────────────
+features:
+  scraping: false                # V2
+  open_webui: false              # V2
+  feedback_learning: false       # V2 (but 👍/👎 reactions are still recorded)
+  weather: false                 # V2
+  calendar: false                # V3

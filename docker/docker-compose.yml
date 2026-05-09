@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# V1 stack: just two containers.
+#
+# Run from the NUC, in the cloned repo:
+#   cd ~/clawbot && docker compose -f docker/docker-compose.yml up -d
+#
+# Volumes are bind-mounted from ~/clawbot/* on the host, NOT named volumes.
+# This makes backup/restore trivial: tar the host directories.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Ollama — runs the LLM (Gemma 3 1B) and embedding model (nomic-embed-text)
+  # ───────────────────────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: clawbot-ollama
+    restart: unless-stopped
+    # NOTE: not exposing port to host by default. clawbot reaches it over the
+    # internal Docker network at http://ollama:11434. Uncomment to expose for debugging.
+    # ports:
+    #   - "127.0.0.1:11434:11434"
+    volumes:
+      # Model weights — large files; keep them on local SSD
+      - ../models/ollama:/root/.ollama
+    environment:
+      # Aggressively unload models when idle to save RAM on the 8 GB NUC.
+      # 5m idle = unload. Tune in config/clawbot.yaml later.
+      - OLLAMA_KEEP_ALIVE=5m
+      # Limit parallelism on a 2-core CPU
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=1
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # clawbot — the Python application (FastAPI + scheduler + Discord bot + image worker)
+  # ───────────────────────────────────────────────────────────────────────────
+  clawbot:
+    build:
+      context: ..
+      dockerfile: docker/clawbot.Dockerfile
+    container_name: clawbot
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    env_file:
+      - ../secrets/.env
+    environment:
+      - CLAWBOT_CONFIG=/app/config/clawbot.yaml
+      - CLAWBOT_HOME=/data
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      # Application data lives on the host so it survives container rebuilds
+      - ../db:/data/db
+      - ../images:/data/images
+      - ../inbox:/data/inbox
+      - ../logs:/data/logs
+      - ../backups:/data/backups
+      # Configs and Fashion-CLIP cache
+      - ../config:/app/config:ro
+      - ../models/fashion-clip:/data/models/fashion-clip
+    ports:
+      # FastAPI on the LAN (Discord bot connects out, no port needed for it)
+      - "127.0.0.1:8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 3G
