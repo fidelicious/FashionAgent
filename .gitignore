@@ -1,0 +1,54 @@
+# --- Secrets ---
+secrets/.env
+secrets/*.key
+*.pem
+
+# --- Runtime data (never commit) ---
+# These dirs only exist on the NUC; this gitignore guards against accidental commits
+# if a user copies them onto the dev machine.
+db/
+images/
+inbox/
+logs/
+backups/
+models/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- Editors / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/
+
+# --- iCloud quirks ---
+.iCloud/
+*.icloud
+.fseventsd/
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+
+# --- Docker ---
+*.dockerignore.local
