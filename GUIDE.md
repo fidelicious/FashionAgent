@@ -204,8 +204,8 @@ Pick one of the two options:
 If you've pushed the repo to GitHub or another remote:
 
 ```bash
-mkdir -p ~/clawbot
-cd ~/clawbot
+mkdir -p ~/FashionAgent
+cd ~/FashionAgent
 git clone <your-remote-url> .
 ```
 
@@ -219,7 +219,7 @@ rsync -av --delete \
     --exclude='__pycache__' \
     --exclude='.venv' \
     "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Projects/FashionAgent/" \
-    "you@192.168.1.42:/home/you/clawbot/"
+    "fidelicious@10.0.0.85:/home/fidelicious/FashionAgent/"
 ```
 
 This copies the source. Re-run it after any edit on the Mac.
@@ -230,7 +230,7 @@ These directories are **not in git** (they're listed in `.gitignore`) so you
 need to create them explicitly. They live alongside the source on the NUC.
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 mkdir -p db images/{raw,cutouts,final,products,outfits} \
          inbox/{screenshots,email} \
          logs models backups secrets
@@ -247,7 +247,7 @@ chmod 700 secrets
 ### How to verify
 
 ```bash
-ls -la ~/clawbot
+ls -la ~/FashionAgent
 ```
 
 You should see the source files (`pyproject.toml`, `docker/`, `src/`, etc.)
@@ -256,7 +256,7 @@ plus the runtime dirs you just made. `secrets/` should show `drwx------`.
 ### Troubleshooting
 
 - **rsync says "permission denied"** — make sure your user owns
-  `/home/you/clawbot` on the NUC: `sudo chown -R you:you /home/you/clawbot`.
+  `/home/fidelicious/FashionAgent` on the NUC: `sudo chown -R fidelicious:fidelicious /home/fidelicious/FashionAgent`.
 - **`mkdir` complains the directory already exists** — that's fine, the `-p`
   flag makes it idempotent.
 
@@ -358,7 +358,7 @@ This file holds the Discord token + IDs from Section 4. It is **never
 committed to git**.
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 cp secrets/.env.example secrets/.env
 chmod 600 secrets/.env
 nano secrets/.env       # or vim, or your editor of choice
@@ -407,7 +407,7 @@ Ollama is the LLM runtime. We use the official image; nothing custom.
 ### Boot Ollama
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 docker compose -f docker/docker-compose.yml up -d ollama
 ```
 
@@ -447,8 +447,7 @@ docker exec -it clawbot-ollama ollama list
 You should see both models listed.
 
 ```bash
-docker exec -it clawbot-ollama \
-    curl -s http://localhost:11434/api/generate \
+curl -s http://localhost:11434/api/generate \
     -d '{"model":"gemma3:1b","prompt":"say hi","stream":false}' \
     | head -c 200
 ```
@@ -464,7 +463,7 @@ of idle, the model unloads (we set `OLLAMA_KEEP_ALIVE=5m` in compose).
   `docker compose -f docker/docker-compose.yml ps` shows the state. If it
   says "Exited", `docker compose -f docker/docker-compose.yml logs ollama`
   shows why. Common cause: the `models/ollama` volume isn't writable.
-  Fix: `chmod 755 ~/clawbot/models/ollama`.
+  Fix: `chmod 755 ~/FashionAgent/models/ollama`.
 - **`ollama pull` hangs at 0%** — your DNS isn't resolving. Try
   `docker exec -it clawbot-ollama ping -c 1 registry.ollama.ai`.
 - **Generation is extremely slow (>2 minutes)** — your CPU is heavily
@@ -487,7 +486,7 @@ dependencies (rembg, torch, etc.). It takes 10–20 minutes on this CPU.
 Subsequent builds are fast thanks to layer caching.
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 docker compose -f docker/docker-compose.yml build clawbot
 ```
 
@@ -568,11 +567,11 @@ When the Discord bot is wired up, the same effect will be achievable via
 The plan is two flavors of "drop file → bot processes it":
 
 - **Screenshots from your phone** — AirDrop or share-sheet to a Mac
-  folder, rsync that folder to `~/clawbot/inbox/screenshots/` on the NUC
+  folder, rsync that folder to `~/FashionAgent/inbox/screenshots/` on the NUC
   every minute via cron. The watcher picks files up within 60 s.
 - **Forwarded retailer emails** — Gmail filter forwards order/sale mails
   to a folder; getmail or imapfilter on the NUC writes the `.eml` files
-  into `~/clawbot/inbox/email/`. Same watcher, same outcome.
+  into `~/FashionAgent/inbox/email/`. Same watcher, same outcome.
 
 Detailed commands land here when Step 8 ships.
 
@@ -608,10 +607,10 @@ Detailed commands land here when Step 8 ships.
 > - Update LLM: `docker exec clawbot-ollama ollama pull gemma3:1b`.
 > - Update Python deps: edit `pyproject.toml`, then
 >   `docker compose build --no-cache clawbot`.
-> - Inspect DB: `sqlite3 ~/clawbot/db/clawbot.db` then `.tables`, `.schema`,
+> - Inspect DB: `sqlite3 ~/FashionAgent/db/clawbot.db` then `.tables`, `.schema`,
 >   `SELECT * FROM user_profile;` etc.
 > - Free disk: `docker system prune -a` (removes unused images), then
->   inspect `~/clawbot/images/raw/` for items that already have cutouts.
+>   inspect `~/FashionAgent/images/raw/` for items that already have cutouts.
 
 ---
 
@@ -653,14 +652,14 @@ The 8 GB budget is tight when Fashion-CLIP + rembg are both resident.
 
 1. `df -h ~` to confirm.
 2. `docker system prune -a` (frees old images/containers/builds).
-3. `du -sh ~/clawbot/*` — if `images/raw/` is the culprit, its files are
+3. `du -sh ~/FashionAgent/*` — if `images/raw/` is the culprit, its files are
    originals you no longer strictly need (cutouts and final thumbnails
    live elsewhere). Plan: a Step-14 retention policy will auto-thin.
 
 ### "I want to start over from scratch"
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 docker compose -f docker/docker-compose.yml down
 rm -rf db/* images/*/* logs/* backups/* models/fashion-clip/*
 # DO NOT delete models/ollama unless you want to re-download the LLM
