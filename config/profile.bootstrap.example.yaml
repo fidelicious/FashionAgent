@@ -1,0 +1,68 @@
+# Profile bootstrap — copy to config/profile.bootstrap.yaml on the NUC, edit,
+# then run:  docker exec clawbot python -m clawbot.scripts.bootstrap_profile
+#
+# Anything you skip here you can fill in later via Discord '/profile set'.
+# Top-level keys (physical / sizing / style / ...) are visual groupings only;
+# they're flattened at load time. The actual profile fields are the inner keys.
+# See clawbot/profile.py::PROFILE_FIELDS for the full list.
+
+physical:
+  # name: "Your name"
+  # age_range: "30s"             # freeform, e.g. "20s" / "30s" / "40s"
+  # gender_expression: "feminine"
+  # height_cm: 165
+  # weight_kg_optional: 60       # optional — leave commented to skip
+  body_shape: "hourglass"        # rectangle / hourglass / pear / apple / inverted-triangle / other
+  skin_tone: "olive"             # fair / light / medium / olive / tan / deep
+  skin_undertone: "warm"         # warm / cool / neutral
+  hair_color: "dark brown"
+  hair_length: "shoulder"
+  hair_style_notes: "natural texture, occasional waves"
+  eye_color: "brown"
+  glasses: "occasional"          # none / always / occasional
+
+sizing:
+  top_size: "M"
+  bottom_size: "8"
+  dress_size: "8"
+  shoe_size_us: 8.5
+  inseam_cm: 78
+  rise_pref: "mid"               # low / mid / high
+  bra_size: "34C"
+
+style:
+  favorite_colors_json:          # comma-separated string also works
+    - "navy"
+    - "camel"
+    - "burgundy"
+    - "olive"
+  disliked_colors_json:
+    - "neon-pink"
+    - "highlighter-yellow"
+  favorite_brands_json:
+    - "COS"
+    - "Quince"
+    - "Madewell"
+  disliked_brands_json: []
+  jewelry_metal: "gold"          # gold / silver / rose / mixed
+  comfort_vs_style: 7            # 1 = pure comfort, 10 = pure style
+
+sensitivities:
+  fabric_avoid_json:
+    - "wool"                     # itchy
+  dye_allergies_json: []
+
+lifestyle:
+  city: "Oakland, CA"
+  climate_notes: "Mild Mediterranean. Layers year-round; rarely above 25C or below 5C."
+  workplace_dress_code: "Tech smart-casual. Client-facing on Tuesdays — sharper looks."
+  commute_mode: "transit"        # walk / bike / car / transit / mixed
+  activity_schedule_json:
+    yoga: "2x/week"
+    walking: "daily"
+  travel_frequency: "once a quarter"
+  religious_cultural_notes: ""
+
+budget:
+  monthly_clothing_budget_usd: 250
+  cost_per_wear_target: 5
