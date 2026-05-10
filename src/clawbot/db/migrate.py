@@ -59,9 +59,12 @@ def run_migrations(conn: sqlite3.Connection, migrations_dir: str | Path) -> list
     applied_now: list[int] = []
     for version, path in pending:
         sql = path.read_text(encoding="utf-8")
+        # executescript() issues an implicit COMMIT before running, so we
+        # cannot wrap it in our transaction() context manager. Instead we let
+        # executescript manage the schema DDL transaction on its own, then
+        # record the version in a separate explicit transaction.
+        conn.executescript(sql)
         with transaction(conn):
-            # executescript lets us run multi-statement SQL files
-            conn.executescript(sql)
             conn.execute(
                 "INSERT INTO schema_migrations(version, applied_at) "
                 "VALUES (?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
