@@ -9,6 +9,7 @@ softmax outcomes are predictable.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,7 @@ from clawbot.vision import classify, models
 
 
 @pytest.fixture(autouse=True)
-def _reset_models():
+def _reset_models() -> Iterator[None]:
     models.release()
     yield
     models.release()

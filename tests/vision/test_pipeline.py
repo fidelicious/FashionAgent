@@ -9,6 +9,7 @@ contract under test.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +20,7 @@ from clawbot.config import (
     ImagePipelineConfig,
     PathsConfig,
 )
-from clawbot.vision import models, pipeline
+from clawbot.vision import classify, color, cutout, embed, models, ocr, pipeline
 from clawbot.vision.draft import ClassificationResult, OcrResult
 
 # Module-level default avoids ruff's B008 warning about constructing dataclasses
@@ -28,7 +29,7 @@ _DEFAULT_OCR = OcrResult("Aritzia", 89.0, "raw")
 
 
 @pytest.fixture(autouse=True)
-def _reset_models():
+def _reset_models() -> Iterator[None]:
     models.release()
     yield
     models.release()
@@ -57,6 +58,7 @@ def _wire_stage_mocks(
     ocr_result: OcrResult | None = _DEFAULT_OCR,
 ) -> dict[str, int]:
     """Patch every stage and return a counter dict to assert call counts."""
+    """Patch every stage and return a counter dict to assert call counts."""
     calls = {"cutout": 0, "color": 0, "embed": 0, "classify": 0, "ocr": 0, "release": 0}
 
     if embedding is None:
@@ -80,7 +82,7 @@ def _wire_stage_mocks(
         calls["embed"] += 1
         return embedding
 
-    def fake_classify(p: Path, *, embedding: np.ndarray, threshold: float):
+    def fake_classify(p: Path, *, embedding: np.ndarray, threshold: float) -> tuple[ClassificationResult, dict[str, float]]:
         calls["classify"] += 1
         return classification, cls_conf
 
@@ -91,11 +93,11 @@ def _wire_stage_mocks(
     def fake_release() -> None:
         calls["release"] += 1
 
-    monkeypatch.setattr(pipeline.cutout, "remove_background", fake_cutout)
-    monkeypatch.setattr(pipeline.color, "extract_palette", fake_color)
-    monkeypatch.setattr(pipeline.embed, "compute", fake_embed)
-    monkeypatch.setattr(pipeline.classify, "zero_shot", fake_classify)
-    monkeypatch.setattr(pipeline.ocr, "read", fake_ocr)
+    monkeypatch.setattr(cutout, "remove_background", fake_cutout)
+    monkeypatch.setattr(color, "extract_palette", fake_color)
+    monkeypatch.setattr(embed, "compute", fake_embed)
+    monkeypatch.setattr(classify, "zero_shot", fake_classify)
+    monkeypatch.setattr(ocr, "read", fake_ocr)
     monkeypatch.setattr(models, "release", fake_release)
     return calls
 
@@ -216,7 +218,7 @@ def test_release_called_even_on_stage_failure(
     def boom(raw_path: Path, config: ClawbotConfig) -> Path:
         raise RuntimeError("rembg blew up")
 
-    monkeypatch.setattr(pipeline.cutout, "remove_background", boom)
+    monkeypatch.setattr(cutout, "remove_background", boom)
     monkeypatch.setattr(models, "release", lambda: calls.__setitem__("release", calls["release"] + 1))
 
     with pytest.raises(RuntimeError, match="rembg blew up"):

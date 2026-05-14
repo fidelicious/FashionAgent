@@ -11,13 +11,15 @@ Verified properties:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 from clawbot.vision import models
 
 
 @pytest.fixture(autouse=True)
-def _reset_singletons():
+def _reset_singletons() -> Iterator[None]:
     """Tests share the module — reset state before/after each test."""
     models.release()
     yield
@@ -30,7 +32,7 @@ def test_get_clip_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def fake_load() -> tuple[object, object]:
         calls["n"] += 1
-        return sentinel  # type: ignore[return-value]
+        return sentinel
 
     monkeypatch.setattr(models, "_load_fashion_clip", fake_load)
     first = models.get_clip()
@@ -63,7 +65,7 @@ def test_release_drops_clip_and_rembg(monkeypatch: pytest.MonkeyPatch) -> None:
     assert models._rembg is not None
     models.release()
     assert models._clip is None
-    assert models._rembg is None
+    assert models._rembg is None  # type: ignore[unreachable]
 
 
 def test_release_is_idempotent() -> None:
