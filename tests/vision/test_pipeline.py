@@ -58,7 +58,6 @@ def _wire_stage_mocks(
     ocr_result: OcrResult | None = _DEFAULT_OCR,
 ) -> dict[str, int]:
     """Patch every stage and return a counter dict to assert call counts."""
-    """Patch every stage and return a counter dict to assert call counts."""
     calls = {"cutout": 0, "color": 0, "embed": 0, "classify": 0, "ocr": 0, "release": 0}
 
     if embedding is None:
