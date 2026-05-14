@@ -20,6 +20,7 @@ threading.Lock here.
 from __future__ import annotations
 
 import gc
+from dataclasses import dataclass
 from typing import Any
 
 # Cache state. ``Any`` keeps unit tests free of torch / rembg imports.
@@ -83,24 +84,93 @@ def release() -> None:
 
 
 def _load_fashion_clip() -> tuple[Any, Any]:
-    """Load Fashion-CLIP weights. Replaced with the real impl in Task 11."""
-    raise NotImplementedError(
-        "Fashion-CLIP loader not wired yet — pending Task 11. "
-        "Monkeypatch this function in unit tests."
+    """Load Fashion-CLIP weights into RAM (~600 MB).
+
+    Uses open_clip_torch, which is the standard way to load the
+    patrickjohncyh/fashion-clip checkpoint. The model is moved to CPU
+    explicitly — the NUC has no GPU.
+    """
+    import open_clip
+
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        "hf-hub:patrickjohncyh/fashion-clip"
     )
+    model.eval()
+    model.to("cpu")
+    tokenizer = open_clip.get_tokenizer("hf-hub:patrickjohncyh/fashion-clip")
+    # We bundle the tokenizer with the preprocessor as the "processor" tuple
+    # because both downstream stages (embed, classify) need access:
+    # embed uses `preprocess`; classify uses `tokenizer` indirectly through
+    # _compute_text_embeddings below.
+    return model, _ClipProcessor(preprocess=preprocess, tokenizer=tokenizer)
 
 
 def _new_rembg_session(model_name: str) -> Any:
-    """Construct a rembg Session. Replaced with the real impl in Task 11."""
-    raise NotImplementedError(
-        "rembg session loader not wired yet — pending Task 11. "
-        "Monkeypatch this function in unit tests."
-    )
+    """Construct a rembg Session for the named model (e.g. ``u2netp``)."""
+    import rembg
+
+    return rembg.new_session(model_name)
 
 
 def _compute_text_embeddings() -> dict[str, Any]:
-    """Compute and cache text-prompt embeddings. Replaced in Task 11."""
-    raise NotImplementedError(
-        "Text-embedding computer not wired yet — pending Task 11. "
-        "Monkeypatch this function in unit tests."
+    """Encode every taxonomy prompt and return a key→ndarray dict.
+
+    Keys are namespaced: ``category:<name>``, ``subcategory:<cat>:<name>``,
+    ``formality:<name>``, ``season:<name>``. Values are unit-normalized
+    float32 ndarrays of shape (512,).
+
+    Called once per pipeline run (or once per session when
+    ``lazy_load_models`` is false). The cost is small relative to the
+    image forward pass.
+    """
+    import numpy as np
+    import torch
+
+    from clawbot.vision.taxonomy import (
+        CATEGORY_PROMPTS,
+        FORMALITY_PROMPTS,
+        SEASON_PROMPTS,
+        SUBCATEGORY_PROMPTS,
     )
+
+    model, processor = get_clip()
+    tokenizer = processor.tokenizer
+
+    # Build a flat (key, prompt) list so we tokenize/encode in one batch.
+    items: list[tuple[str, str]] = []
+    items.extend((f"category:{k}", v) for k, v in CATEGORY_PROMPTS.items())
+    for cat, subs in SUBCATEGORY_PROMPTS.items():
+        items.extend((f"subcategory:{cat}:{name}", p) for name, p in subs.items())
+    items.extend((f"formality:{k}", v) for k, v in FORMALITY_PROMPTS.items())
+    items.extend((f"season:{k}", v) for k, v in SEASON_PROMPTS.items())
+
+    keys = [k for k, _ in items]
+    prompts = [p for _, p in items]
+
+    with torch.no_grad():
+        tokens = tokenizer(prompts)
+        embs = model.encode_text(tokens).detach().cpu().numpy().astype(np.float32)
+
+    # L2-normalize each row.
+    norms = np.linalg.norm(embs, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    embs = embs / norms
+
+    return {k: embs[i] for i, k in enumerate(keys)}
+
+
+@dataclass(frozen=True, slots=True)
+class _ClipProcessor:
+    """Bundle the preprocess transform with the tokenizer.
+
+    open_clip returns them separately; embed.compute and the text-embedding
+    builder both reach in here.
+    """
+    preprocess: Any
+    tokenizer: Any
+
+    def __call__(self, *, images: Any, return_tensors: str = "pt") -> dict[str, Any]:
+        """Mirror the HuggingFace processor signature embed.compute relies on."""
+        if return_tensors != "pt":
+            raise ValueError("only return_tensors='pt' is supported")
+        return {"pixel_values": self.preprocess(images).unsqueeze(0)}

@@ -72,8 +72,10 @@ def test_release_is_idempotent() -> None:
 
 
 def test_real_loader_not_implemented_yet() -> None:
-    # Until Task 11 lands, calling the real loader must signal clearly.
-    with pytest.raises(NotImplementedError):
+    # On hosts without [vision] extras installed, the loader fails with
+    # ImportError on `import open_clip`. We accept either signal — this
+    # test exists so unit-tier callers know they MUST monkeypatch the loader.
+    with pytest.raises((NotImplementedError, ImportError, ModuleNotFoundError)):
         models._load_fashion_clip()
 
 

@@ -109,5 +109,5 @@ files = ["src", "tests"]
 # Vision deps live in the [vision] extra and don't ship type stubs.
 # We don't want type-checks to fail on hosts without the extra installed.
 [[tool.mypy.overrides]]
-module = ["colorthief", "rembg", "pytesseract"]
+module = ["colorthief", "rembg", "pytesseract", "open_clip", "torch"]
 ignore_missing_imports = true
