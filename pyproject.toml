@@ -68,6 +68,12 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "pre-commit>=3.7",
+    # Unit-test deps for the vision package. The heavy stages (rembg, torch,
+    # pytesseract) live in the [vision] extra and are mocked in unit tests,
+    # but synthetic-image fixtures and fake-embedding arrays still need these.
+    "numpy>=1.26",
+    "Pillow>=10.3",
+    "colorthief>=0.2.1",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
