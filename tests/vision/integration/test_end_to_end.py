@@ -17,7 +17,23 @@ import pytest
 from clawbot.config import ClawbotConfig, ImagePipelineConfig, PathsConfig
 from clawbot.vision import DraftItem, ingest_image
 
-pytestmark = pytest.mark.integration
+# Belt-and-suspenders skip guard. The directory-level conftest.py already
+# sets collect_ignore_glob when [vision] extras are missing, but that
+# mechanism is fragile if the conftest itself ever gains a non-gated
+# import. This pytestmark keeps the suite robust to that failure.
+try:
+    import torch  # noqa: F401
+    _vision_available = True
+except ImportError:
+    _vision_available = False
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not _vision_available,
+        reason="[vision] extras not installed",
+    ),
+]
 
 CATEGORIES = {
     "tops", "bottoms", "dresses", "outerwear",

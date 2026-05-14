@@ -32,7 +32,9 @@ class ClassificationResult:
     category: str
     subcategory: str | None
     formality: str
-    seasons: list[str]
+    # tuple, not list — frozen=True blocks reassignment but a list field is
+    # still mutable in place. Tuple preserves order and is genuinely immutable.
+    seasons: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

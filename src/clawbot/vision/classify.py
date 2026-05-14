@@ -79,7 +79,7 @@ def zero_shot(
             category=category,
             subcategory=subcategory,
             formality=formality,
-            seasons=sorted(seasons),
+            seasons=tuple(sorted(seasons)),
         ),
         {
             "category": cat_conf,

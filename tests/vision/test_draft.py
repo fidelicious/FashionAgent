@@ -34,7 +34,7 @@ def _make_draft(**overrides: object) -> DraftItem:
             category="tops",
             subcategory="cardigan",
             formality="smart-casual",
-            seasons=["fall", "winter"],
+            seasons=("fall", "winter"),
         ),
         "ocr": None,
         "embedding": np.zeros((512,), dtype=np.float32),
@@ -72,10 +72,22 @@ def test_classification_result_is_frozen() -> None:
         category="tops",
         subcategory=None,
         formality="casual",
-        seasons=["spring"],
+        seasons=("spring",),
     )
     with pytest.raises(FrozenInstanceError):
         cls.category = "bottoms"  # type: ignore[misc]
+
+
+def test_classification_result_seasons_is_immutable() -> None:
+    cls = ClassificationResult(
+        category="tops",
+        subcategory=None,
+        formality="casual",
+        seasons=("spring", "fall"),
+    )
+    # tuple has no append/extend — type checker would catch this too.
+    with pytest.raises(AttributeError):
+        cls.seasons.append("winter")  # type: ignore[attr-defined]
 
 
 def test_ocr_result_is_frozen() -> None:
@@ -107,7 +119,7 @@ def test_subcategory_can_be_none() -> None:
             category="tops",
             subcategory=None,
             formality="casual",
-            seasons=["spring"],
+            seasons=("spring",),
         ),
     )
     assert draft.classification.subcategory is None

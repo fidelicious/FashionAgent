@@ -63,7 +63,7 @@ def _wire_stage_mocks(
     if embedding is None:
         embedding = np.zeros(512, dtype=np.float32)
     if classification is None:
-        classification = ClassificationResult("tops", "cardigan", "casual", ["fall"])
+        classification = ClassificationResult("tops", "cardigan", "casual", ("fall",))
     if cls_conf is None:
         cls_conf = {"category": 0.9, "subcategory": 0.8, "formality": 0.7, "season": 0.6}
 

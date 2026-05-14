@@ -73,12 +73,21 @@ def test_release_is_idempotent() -> None:
     models.release()  # second call must not error
 
 
-def test_real_loader_not_implemented_yet() -> None:
-    # On hosts without [vision] extras installed, the loader fails with
-    # ImportError on `import open_clip`. We accept either signal — this
-    # test exists so unit-tier callers know they MUST monkeypatch the loader.
-    with pytest.raises((NotImplementedError, ImportError, ModuleNotFoundError)):
-        models._load_fashion_clip()
+def test_real_loader_requires_vision_extras_or_succeeds() -> None:
+    # Behavior depends on host:
+    #   - Mac dev (no [vision] extras): _load_fashion_clip raises ImportError
+    #     because `import open_clip` fails. Unit tests proceed via the
+    #     monkeypatched fake loader.
+    #   - NUC with [vision] extras: _load_fashion_clip succeeds and returns
+    #     a (model, processor) tuple. We don't load 600 MB just to check that.
+    # This test only documents the seam — it passes silently on either path.
+    try:
+        result = models._load_fashion_clip()
+    except (ImportError, ModuleNotFoundError):
+        return  # Mac path: extras missing, loader can't even import.
+    # NUC path: a real model came back. Validate the shape and let the rest
+    # of the test scope clean up via the autouse release fixture.
+    assert isinstance(result, tuple) and len(result) == 2
 
 
 def test_get_text_embeddings_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
