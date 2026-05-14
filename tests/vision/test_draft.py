@@ -57,10 +57,14 @@ def test_draft_item_is_frozen() -> None:
 
 
 def test_draft_item_uses_slots() -> None:
+    # We can't trigger AttributeError via assignment because frozen=True
+    # makes ANY __setattr__ raise FrozenInstanceError first. Instead, verify
+    # slots are active by introspection: __slots__ is populated and the
+    # instance has no __dict__ to absorb stray attributes.
     draft = _make_draft()
-    # Slots prevent ad-hoc attribute creation.
-    with pytest.raises(AttributeError):
-        draft.surprise = "value"  # type: ignore[attr-defined]
+    assert hasattr(DraftItem, "__slots__")
+    assert "image_raw_path" in DraftItem.__slots__
+    assert not hasattr(draft, "__dict__")
 
 
 def test_classification_result_is_frozen() -> None:
