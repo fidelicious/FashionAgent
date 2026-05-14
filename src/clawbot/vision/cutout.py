@@ -45,6 +45,8 @@ def _rembg_remove(image: Image.Image, session: Any) -> Image.Image:
     The lazy import keeps onnxruntime / rembg out of import time on hosts
     without the [vision] extras installed.
     """
-    from rembg import remove  # noqa: PLC0415 — intentional lazy import
+    from rembg import remove
 
-    return remove(image, session=session)
+    # rembg is untyped; the override in pyproject silences the import but
+    # mypy still sees the return as Any. Cast back to the declared type.
+    return remove(image, session=session)  # type: ignore[no-any-return]

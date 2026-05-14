@@ -75,6 +75,7 @@ def _tesseract_image_to_string(image: Image.Image) -> str:
 
     Lazy import keeps pytesseract out of import time on hosts that lack it.
     """
-    import pytesseract  # noqa: PLC0415 — intentional lazy import
+    import pytesseract
 
-    return pytesseract.image_to_string(image)
+    # pytesseract is untyped; mypy sees the return as Any.
+    return pytesseract.image_to_string(image)  # type: ignore[no-any-return]

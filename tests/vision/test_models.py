@@ -84,7 +84,7 @@ def test_get_text_embeddings_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None
     sentinel = {"tops": np.zeros(512, dtype=np.float32)}
     calls = {"n": 0}
 
-    def fake_compute() -> dict[str, "np.ndarray"]:
+    def fake_compute() -> dict[str, np.ndarray]:
         calls["n"] += 1
         return sentinel
 

@@ -19,8 +19,12 @@ from clawbot.config import (
     ImagePipelineConfig,
     PathsConfig,
 )
-from clawbot.vision import pipeline, models
+from clawbot.vision import models, pipeline
 from clawbot.vision.draft import ClassificationResult, OcrResult
+
+# Module-level default avoids ruff's B008 warning about constructing dataclasses
+# in argument defaults. Safe to share because OcrResult is frozen.
+_DEFAULT_OCR = OcrResult("Aritzia", 89.0, "raw")
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +54,7 @@ def _wire_stage_mocks(
     embedding: np.ndarray | None = None,
     classification: ClassificationResult | None = None,
     cls_conf: dict[str, float] | None = None,
-    ocr_result: OcrResult | None = OcrResult("Aritzia", 89.0, "raw"),
+    ocr_result: OcrResult | None = _DEFAULT_OCR,
 ) -> dict[str, int]:
     """Patch every stage and return a counter dict to assert call counts."""
     calls = {"cutout": 0, "color": 0, "embed": 0, "classify": 0, "ocr": 0, "release": 0}
