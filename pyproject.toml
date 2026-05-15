@@ -28,7 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 # Step 5+ image pipeline. Install on the NUC only, not on the dev Mac.
 vision = [
-    "rembg>=2.0.57",
+    "rembg[cpu]>=2.0.57",
     "Pillow>=10.3",
     "colorthief>=0.2.1",
     "open-clip-torch>=2.24",      # Fashion-CLIP loads via this lib
