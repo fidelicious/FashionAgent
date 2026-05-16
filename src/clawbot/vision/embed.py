@@ -47,16 +47,14 @@ def compute(cutout_path: Path) -> np.ndarray:
 
 
 def _encode_no_grad(model: object, pixel_values: object) -> object:
-    """Run the model's encode under torch.no_grad when torch is around.
+    """Run the vision encoder under torch.no_grad when torch is around.
 
     Lazy import so this module collects on hosts without [vision] extras.
-    Tests monkeypatch ``get_clip`` to return a fake model with a plain
-    ``get_image_features`` — the fake returns ndarray directly.
-
-    ``CLIPModel.get_image_features`` should return a tensor, but some model
-    configurations and transformers versions return a ``BaseModelOutputWithPooling``
-    instead.  When that happens we apply ``model.visual_projection`` manually
-    to the pooler_output to get the same 512-d projected features.
+    Tests monkeypatch ``get_clip`` to return a fake model that only
+    implements ``get_image_features`` — the real path goes through
+    ``vision_model + visual_projection`` to avoid the ambiguity of
+    ``get_image_features`` returning a ModelOutput object instead of a
+    plain tensor in some transformers versions.
     """
     try:
         import torch
@@ -65,12 +63,24 @@ def _encode_no_grad(model: object, pixel_values: object) -> object:
         return model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]
 
     with torch.no_grad():
+        # Prefer the explicit two-step path when the model exposes the
+        # underlying vision encoder and projection layer directly.
+        # This avoids get_image_features() returning a ModelOutput wrapper
+        # (instead of a plain tensor) in certain transformers versions.
+        if hasattr(model, "vision_model") and hasattr(model, "visual_projection"):
+            vision_out = model.vision_model(pixel_values=pixel_values)  # type: ignore[attr-defined]
+            # vision_out[1] is pooler_output — the CLS-token representation
+            # (e.g. 768-d for ViT-B/32) before the projection head.
+            pooled = vision_out[1]
+            return model.visual_projection(pooled)  # type: ignore[attr-defined]
+
+        # Fallback for test fakes that only implement get_image_features.
         result = model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]
         if isinstance(result, torch.Tensor):
             return result
-        # BaseModelOutputWithPooling or similar ModelOutput: project manually.
-        pooler = getattr(result, "pooler_output", None)
-        if pooler is None:
-            # Fall back to indexing (index 1 = pooler_output in standard outputs).
-            pooler = result[1]  # type: ignore[index]
-        return model.visual_projection(pooler)  # type: ignore[attr-defined]
+        # ModelOutput: return the first 2-D float tensor found in the tuple.
+        to_check = result.to_tuple() if hasattr(result, "to_tuple") else (result[0], result[1])
+        for val in to_check:
+            if isinstance(val, torch.Tensor) and val.dim() == 2 and val.is_floating_point():
+                return val
+        raise RuntimeError(f"Cannot extract image features from {type(result)}")
