@@ -47,18 +47,30 @@ def compute(cutout_path: Path) -> np.ndarray:
 
 
 def _encode_no_grad(model: object, pixel_values: object) -> object:
-    """Run the model's encode_image under torch.no_grad when torch is around.
+    """Run the model's encode under torch.no_grad when torch is around.
 
     Lazy import so this module collects on hosts without [vision] extras.
     Tests monkeypatch ``get_clip`` to return a fake model with a plain
-    ``encode_image`` — the fake never hits this helper because we route
-    through ``model.encode_image`` directly via this seam.
+    ``get_image_features`` — the fake returns ndarray directly.
+
+    ``CLIPModel.get_image_features`` should return a tensor, but some model
+    configurations and transformers versions return a ``BaseModelOutputWithPooling``
+    instead.  When that happens we apply ``model.visual_projection`` manually
+    to the pooler_output to get the same 512-d projected features.
     """
     try:
         import torch
     except ImportError:
-        # No torch installed (unit-test tier on Mac); the fake model in
-        # tests returns ndarray directly without needing no_grad.
+        # No torch installed (unit-test tier on Mac); fake model returns ndarray.
         return model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]
+
     with torch.no_grad():
-        return model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]
+        result = model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]
+        if isinstance(result, torch.Tensor):
+            return result
+        # BaseModelOutputWithPooling or similar ModelOutput: project manually.
+        pooler = getattr(result, "pooler_output", None)
+        if pooler is None:
+            # Fall back to indexing (index 1 = pooler_output in standard outputs).
+            pooler = result[1]  # type: ignore[index]
+        return model.visual_projection(pooler)  # type: ignore[attr-defined]

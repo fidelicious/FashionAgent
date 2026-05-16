@@ -30,23 +30,34 @@ _MAX_RGB_DISTANCE = math.sqrt(3) * 255.0
 
 
 def _make_thief(cutout_path: Path) -> ColorThief:
-    """Return a ColorThief for cutout_path.
+    """Return a ColorThief backed by a grey-composited rendering of cutout_path.
 
-    colorthief filters out pixels with alpha < 125. When rembg removes
-    everything (e.g. synthetic images with flat colours that look like
-    background), the quantizer receives zero pixels and raises. Detect
-    that case up-front and fall back to a fully-opaque RGB rendering so
-    colorthief always has something to work with.
+    colorthief has two silent filters that can produce zero valid pixels:
+    1. Alpha filter: drops pixels with alpha < 125 — harmless for real photos
+       but kills fully-transparent rembg cutouts of synthetic test images.
+    2. ``ignore_white`` filter (default True): drops pixels where R, G, B > 250
+       — kills cutouts where rembg left only near-white pixels opaque.
+
+    Compositing the RGBA image onto a neutral mid-grey (128, 128, 128)
+    background sidesteps both filters: garment pixels blend with grey
+    (still identifiable as the garment's hue), and a fully-transparent
+    cutout degrades gracefully to grey rather than crashing.
     """
     with Image.open(cutout_path) as img:
-        if img.mode in ("RGBA", "LA"):
-            has_opaque = any(a >= 125 for a in img.getchannel("A").getdata())
-            if not has_opaque:
-                buf = io.BytesIO()
-                img.convert("RGB").save(buf, format="PNG")
-                buf.seek(0)
-                return ColorThief(buf)
-    return ColorThief(str(cutout_path))
+        if img.mode == "RGBA":
+            bg = Image.new("RGB", img.size, (128, 128, 128))
+            # paste uses the alpha channel as the compositing mask.
+            bg.paste(img.convert("RGB"), mask=img.split()[3])
+            composite = bg
+        elif img.mode != "RGB":
+            composite = img.convert("RGB")
+        else:
+            composite = img.copy()
+
+        buf = io.BytesIO()
+        composite.save(buf, format="PNG")
+        buf.seek(0)
+    return ColorThief(buf)
 
 
 def extract_palette(cutout_path: Path) -> tuple[str, str | None, float]:
