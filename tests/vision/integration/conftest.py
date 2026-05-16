@@ -13,7 +13,7 @@ from __future__ import annotations
 
 # Detect [vision] extras; skip the whole subtree if missing.
 try:
-    import open_clip  # noqa: F401
+    from transformers import CLIPModel  # noqa: F401
     import pytesseract  # noqa: F401
     import rembg  # noqa: F401
     import torch  # noqa: F401

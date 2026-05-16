@@ -10,12 +10,14 @@ item as single-color.
 
 from __future__ import annotations
 
+import io
 import math
 from pathlib import Path
 
 # colorthief is in the [dev] extras, so safe to import at module level
 # alongside Pillow. Heavy ML deps live inside function bodies elsewhere.
 from colorthief import ColorThief
+from PIL import Image
 
 # Two colors within this Euclidean distance in RGB space are treated as
 # the same color. Tuned empirically: ~30 catches near-identical shades
@@ -25,6 +27,26 @@ _SECONDARY_DISTANCE_THRESHOLD = 30.0
 # Maximum perceptual distance (sqrt(3) * 255 ≈ 441) used to normalize the
 # heuristic confidence score into [0, 1].
 _MAX_RGB_DISTANCE = math.sqrt(3) * 255.0
+
+
+def _make_thief(cutout_path: Path) -> ColorThief:
+    """Return a ColorThief for cutout_path.
+
+    colorthief filters out pixels with alpha < 125. When rembg removes
+    everything (e.g. synthetic images with flat colours that look like
+    background), the quantizer receives zero pixels and raises. Detect
+    that case up-front and fall back to a fully-opaque RGB rendering so
+    colorthief always has something to work with.
+    """
+    with Image.open(cutout_path) as img:
+        if img.mode in ("RGBA", "LA"):
+            has_opaque = any(a >= 125 for a in img.getchannel("A").getdata())
+            if not has_opaque:
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="PNG")
+                buf.seek(0)
+                return ColorThief(buf)
+    return ColorThief(str(cutout_path))
 
 
 def extract_palette(cutout_path: Path) -> tuple[str, str | None, float]:
@@ -42,7 +64,7 @@ def extract_palette(cutout_path: Path) -> tuple[str, str | None, float]:
         Confidence is a heuristic in [0, 1]: how distinct the primary is
         from the average of the palette tail. 1.0 = strong single hue.
     """
-    thief = ColorThief(str(cutout_path))
+    thief = _make_thief(cutout_path)
     palette = thief.get_palette(color_count=3, quality=10)
     primary_rgb = palette[0]
 

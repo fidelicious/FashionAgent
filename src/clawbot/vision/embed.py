@@ -5,9 +5,9 @@ Fashion-CLIP image embeddings.
 Fashion-CLIP model, and returns a unit-normalized 512-dim float32 vector.
 Normalization makes downstream cosine similarity a plain dot product.
 
-The model interface is duck-typed: ``model.encode_image(pixel_values)``
+The model interface is duck-typed: ``model.get_image_features(pixel_values=pixel_values)``
 returns a 2-D array of shape ``(1, 512)``. The processor is called with
-keyword ``return_tensors="pt"`` to mirror the HuggingFace open_clip API.
+keyword ``return_tensors="pt"`` matching the HuggingFace Transformers API.
 """
 
 from __future__ import annotations
@@ -59,6 +59,6 @@ def _encode_no_grad(model: object, pixel_values: object) -> object:
     except ImportError:
         # No torch installed (unit-test tier on Mac); the fake model in
         # tests returns ndarray directly without needing no_grad.
-        return model.encode_image(pixel_values)  # type: ignore[attr-defined]
+        return model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]
     with torch.no_grad():
-        return model.encode_image(pixel_values)  # type: ignore[attr-defined]
+        return model.get_image_features(pixel_values=pixel_values)  # type: ignore[attr-defined]

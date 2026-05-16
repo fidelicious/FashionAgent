@@ -20,7 +20,6 @@ threading.Lock here.
 from __future__ import annotations
 
 import gc
-from dataclasses import dataclass
 from typing import Any
 
 # Cache state. ``Any`` keeps unit tests free of torch / rembg imports.
@@ -86,23 +85,18 @@ def release() -> None:
 def _load_fashion_clip() -> tuple[Any, Any]:
     """Load Fashion-CLIP weights into RAM (~600 MB).
 
-    Uses open_clip_torch, which is the standard way to load the
-    patrickjohncyh/fashion-clip checkpoint. The model is moved to CPU
-    explicitly — the NUC has no GPU.
+    patrickjohncyh/fashion-clip is stored in the HuggingFace Transformers
+    format (config.json + model.safetensors), not the open_clip format.
+    We load it via the ``transformers`` library accordingly. The model is
+    moved to CPU — the NUC has no GPU.
     """
-    import open_clip
+    from transformers import CLIPModel, CLIPProcessor
 
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        "hf-hub:patrickjohncyh/fashion-clip"
-    )
+    model = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip")
     model.eval()
     model.to("cpu")
-    tokenizer = open_clip.get_tokenizer("hf-hub:patrickjohncyh/fashion-clip")
-    # We bundle the tokenizer with the preprocessor as the "processor" tuple
-    # because both downstream stages (embed, classify) need access:
-    # embed uses `preprocess`; classify uses `tokenizer` indirectly through
-    # _compute_text_embeddings below.
-    return model, _ClipProcessor(preprocess=preprocess, tokenizer=tokenizer)
+    processor = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
+    return model, processor
 
 
 def _new_rembg_session(model_name: str) -> Any:
@@ -134,9 +128,8 @@ def _compute_text_embeddings() -> dict[str, Any]:
     )
 
     model, processor = get_clip()
-    tokenizer = processor.tokenizer
 
-    # Build a flat (key, prompt) list so we tokenize/encode in one batch.
+    # Build a flat (key, prompt) list so we tokenise/encode in one batch.
     items: list[tuple[str, str]] = []
     items.extend((f"category:{k}", v) for k, v in CATEGORY_PROMPTS.items())
     for cat, subs in SUBCATEGORY_PROMPTS.items():
@@ -148,8 +141,16 @@ def _compute_text_embeddings() -> dict[str, Any]:
     prompts = [p for _, p in items]
 
     with torch.no_grad():
-        tokens = tokenizer(prompts)
-        embs = model.encode_text(tokens).detach().cpu().numpy().astype(np.float32)
+        # processor handles tokenisation, padding, and truncation.
+        text_inputs = processor(
+            text=prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=77,
+        )
+        text_inputs = {k: v.to("cpu") for k, v in text_inputs.items()}
+        embs = model.get_text_features(**text_inputs).detach().cpu().numpy().astype(np.float32)
 
     # L2-normalize each row.
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
@@ -159,18 +160,4 @@ def _compute_text_embeddings() -> dict[str, Any]:
     return {k: embs[i] for i, k in enumerate(keys)}
 
 
-@dataclass(frozen=True, slots=True)
-class _ClipProcessor:
-    """Bundle the preprocess transform with the tokenizer.
 
-    open_clip returns them separately; embed.compute and the text-embedding
-    builder both reach in here.
-    """
-    preprocess: Any
-    tokenizer: Any
-
-    def __call__(self, *, images: Any, return_tensors: str = "pt") -> dict[str, Any]:
-        """Mirror the HuggingFace processor signature embed.compute relies on."""
-        if return_tensors != "pt":
-            raise ValueError("only return_tensors='pt' is supported")
-        return {"pixel_values": self.preprocess(images).unsqueeze(0)}

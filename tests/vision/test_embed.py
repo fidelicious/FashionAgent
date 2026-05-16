@@ -34,7 +34,7 @@ def _install_fake_clip(monkeypatch: pytest.MonkeyPatch, vec: np.ndarray) -> dict
             return {"pixel_values": object()}
 
     class FakeModel:
-        def encode_image(self, pixel_values: object) -> np.ndarray:
+        def get_image_features(self, pixel_values: object) -> np.ndarray:
             calls["encode"] += 1
             return vec.reshape(1, -1)
 
