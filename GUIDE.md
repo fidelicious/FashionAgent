@@ -16,9 +16,9 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/discord-bot` (build Steps 1–7 complete):
+`feat/inbox-watcher` (build Steps 1–8 complete):
 
-- ✅ Sections **1–9** are complete and exercisable today.
+- ✅ Sections **1–10** are complete and exercisable today.
 - ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
   integration tests pass on NUC hardware.
 - ✅ Section **8** (bootstrap your profile) — Step 4 wired the profile
@@ -26,10 +26,14 @@ roughly mirror them but are not identical. As of the current branch
 - ✅ Section **9** (add your first wardrobe item) — Step 7 shipped
   `/add_item`, `/edit_item`, `/forget_item` and the operator-only
   whitelist.
-- ⏳ Sections **10–14** are still pending future build steps:
-  - 10. Auto-ingest from your phone → **build Step 8** (inbox watcher)
+- ✅ Section **10** (auto-ingest from your phone) — Step 8 shipped the
+  inbox watcher: drop a JPG/PNG/WEBP into
+  `inbox/screenshots/`, the scheduler picks it up within 60 s, posts
+  to the operator channel, and quarantines on failure. Hourly
+  `disk_check` job also lives here.
+- ⏳ Sections **11–14** are still pending future build steps:
   - 11. Email forwarding → **build Step 9** (email parser)
-  - 12. Daily 7am outfit push → **build Step 13**
+  - 12. Daily 7am outfit push → **build Step 13** (needs Steps 10–12)
   - 13. Backups and restores → **build Step 14**
   - 14. Maintenance → **build Step 14**
 - 🧰 Section **15** (Troubleshooting) grows in place.
@@ -43,26 +47,30 @@ that same section before moving on.
 ## Where you are now
 
 If you've followed this GUIDE on your NUC (`fidelicious@10.0.0.85`,
-`~/FashionAgent`), you've already completed sections 1–7.5. To bring the
-bot online on the latest branch:
+`~/FashionAgent`), you've already completed sections 1–7.5. To pull the
+post-Step-8 build:
 
-1. Pull the `feat/discord-bot` branch (or whichever branch carries Steps
-   6–7), rebuild the clawbot image:
+```bash
+cd ~/FashionAgent
+git pull
+docker compose -f docker/docker-compose.yml build clawbot
+docker compose -f docker/docker-compose.yml up -d clawbot
+docker compose -f docker/docker-compose.yml logs -f clawbot | grep -E "Synced|Scheduler"
+```
 
-   ```bash
-   git pull
-   docker compose -f docker/docker-compose.yml build clawbot
-   docker compose -f docker/docker-compose.yml up -d clawbot
-   ```
+You should see one `Synced slash commands ...` line and one
+`Scheduler started: inbox_sweep every 60s ...` line on startup.
 
-2. Run **Section 8** to bootstrap your style profile from YAML (still the
-   fastest way to fill 40+ fields).
+From there:
 
-3. Run **Section 9** to add your first wardrobe item with `/add_item`,
-   confirm the draft attributes, and start building the wardrobe.
+1. Run **Section 8** if you haven't yet — bootstrap your style profile
+   from `config/profile.bootstrap.yaml`.
+2. Run **Section 9** to add your first item by hand with `/add_item`.
+3. Run **Section 10** to wire the phone-to-NUC rsync and let the
+   inbox watcher ingest the rest in the background.
 
-After that, the next operator-facing milestone is build Step 8 (inbox
-watcher / auto-ingest) — Section 10 will gain real instructions then.
+After that, the next operator-facing milestone is build Step 9 (email
+forwarding) — Section 11 will gain real instructions then.
 
 If you're new to this NUC and haven't done any setup yet, start at Section 1.
 
@@ -852,19 +860,113 @@ You should see the item you just added, plus any others.
 
 ## 10. Set up auto-ingest from your phone
 
-> ⏳ **Pending build Step 8** (inbox watcher).
+> ✅ **Works today** (build Step 8 shipped the inbox watcher).
+> Screenshots only; email forwarding lands in Step 9.
 
-The plan is two flavors of "drop file → bot processes it":
+### How the watcher works
 
-- **Screenshots from your phone** — AirDrop or share-sheet to a Mac
-  folder, rsync that folder to `~/FashionAgent/inbox/screenshots/` on the NUC
-  every minute via cron. The watcher picks files up within 60 s and routes
-  them through Section 7.5's image pipeline.
-- **Forwarded retailer emails** — Gmail filter forwards order/sale mails
-  to a folder; getmail or imapfilter on the NUC writes the `.eml` files
-  into `~/FashionAgent/inbox/email/`. Same watcher, same outcome.
+A scheduled job inside the clawbot process scans
+`~/FashionAgent/inbox/screenshots/` every
+`schedule.inbox_sweep_seconds` (default **60 s**). For each new image
+file it runs the same pipeline `/add_item` uses (rembg → Fashion-CLIP
+→ color → optional OCR → wardrobe row + embedding), then moves the
+source into a hidden sibling directory so the next sweep doesn't
+reprocess it:
 
-Detailed commands land here when build Step 8 ships.
+```
+inbox/
+├── screenshots/                       ← drop files here
+├── .processed/screenshots/2026-05-16/ ← successful ingests, by UTC date
+└── .failed/screenshots/               ← anything that raised, with a UTC suffix
+```
+
+On success the bot posts to your `DISCORD_CHANNEL_ID` channel with the
+new item's short id and inferred category — same shape as `/add_item`.
+On failure it quarantines the file and posts a `:warning:` with the
+exception type.
+
+### Recommended desktop → NUC transport (rsync over SSH)
+
+On a Mac, save your share-sheet target to
+`~/Pictures/Screenshots-to-Clawbot/`. Then run this once-per-minute
+cron line on the Mac:
+
+```bash
+# crontab -e
+* * * * * rsync -avz --remove-source-files \
+    ~/Pictures/Screenshots-to-Clawbot/ \
+    fidelicious@10.0.0.85:~/FashionAgent/inbox/screenshots/ \
+    >/tmp/clawbot-rsync.log 2>&1
+```
+
+`--remove-source-files` keeps the Mac folder clean after upload. The
+watcher's 5-second mtime stability check ignores files mid-transfer,
+so partial rsync uploads can't be ingested prematurely.
+
+### From iPhone
+
+Use AirDrop into the Mac folder above, or **Shortcuts** with a
+"Save to Folder" action targeting the same path. Anything that lands
+there gets rsync'd in within 60 s and ingested within 120 s.
+
+### How to verify
+
+1. Drop one JPG into `~/FashionAgent/inbox/screenshots/` directly on
+   the NUC (skip the rsync for the smoke test):
+
+   ```bash
+   cp ~/some-cardigan.jpg ~/FashionAgent/inbox/screenshots/
+   ```
+
+2. Within 60 s, Discord should post a `:new:` message in your bot
+   channel with the new item's short id.
+
+3. Confirm the file moved:
+
+   ```bash
+   ls ~/FashionAgent/inbox/screenshots/        # empty (or only stuck files)
+   ls ~/FashionAgent/inbox/.processed/screenshots/  # has today's date dir
+   ```
+
+4. Confirm the row:
+
+   ```bash
+   sqlite3 ~/FashionAgent/db/clawbot.db \
+       "SELECT substr(id,1,8) id, category, subcategory, image_raw_path \
+        FROM wardrobe_items WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1;"
+   ```
+
+5. To force a sweep without waiting, add an admin `/sweep` command in a
+   later step or just `docker compose restart clawbot` and check that
+   `inbox_sweep` runs on startup.
+
+### Disk-usage warnings
+
+The same scheduler that runs `inbox_sweep` also runs `disk_check` on
+the `schedule.disk_check` cron (default hourly). When usage on
+`paths.home` exceeds `health.disk_warn_pct` (default 85%) or
+`health.disk_critical_pct` (95%), the bot posts a one-time alert into
+the operator channel — the inbox watcher is the most disk-heavy thing
+in V1, so it owns this guardrail. Alerts are also written to
+`audit_log` with kind `disk_alert`.
+
+### Troubleshooting
+
+- **Files pile up in `inbox/screenshots/` and nothing happens** — the
+  scheduler didn't start. `docker compose logs clawbot | grep
+  "Scheduler started"` should show one line at boot. If absent,
+  `discord.enabled` is false or the bot is in foundation-idle mode.
+- **File gets moved to `.failed/` immediately** — open the file, check
+  it's a real image (`file <path>`). If it is, look in
+  `audit_log` for the matching `inbox_failed` row to see the
+  exception class.
+- **Bot replies "channel not in cache"** — `DISCORD_CHANNEL_ID` in
+  `secrets/.env` points at a channel the bot can't see (wrong server,
+  no "View Channel" permission). Reinvite or fix the perms.
+- **Sweep runs but the wardrobe row never appears** — the image
+  pipeline raised mid-flight; the file is in `.failed/`. Most common
+  on this NUC: OOM during Fashion-CLIP load. Confirm
+  `image_pipeline.lazy_load_models: true`.
 
 ---
 
