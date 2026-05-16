@@ -16,12 +16,11 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/image-pipeline` (build Step 5 complete):
+`main` (build Steps 1–5 complete, branch `feat/image-pipeline` merged):
 
 - ✅ Sections **1–7** are complete and exercisable today.
-- ✅ Section **7.5** (NEW — validate the image pipeline on the NUC) is the
-  current operator deliverable. The pipeline ships as a callable library;
-  this section verifies it actually runs on your hardware.
+- ✅ Section **7.5** (validate the image pipeline on the NUC) is **done** —
+  all 3 integration tests pass on NUC hardware.
 - ✅ Section **8** (bootstrap your profile) works today — Step 4 wired the
   profile module and YAML loader.
 - ⏳ Sections **9–14** are still pending future build steps. Each section
@@ -43,16 +42,17 @@ that same section before moving on.
 ## Where you are now
 
 If you've followed this GUIDE on your NUC (`fidelicious@10.0.0.85`,
-`~/FashionAgent`), you've already completed sections 1–7. The clawbot
+`~/FashionAgent`), you've already completed sections 1–7.5. The clawbot
 container runs as a stub; Ollama serves the LLM; Discord knows about your
 bot (it appears offline because the bot loop doesn't exist yet — that
-lands in build Step 6).
+lands in build Step 6). The image pipeline integration tests all pass on
+the NUC (build Step 5 verified ✅).
 
-**Resume at Section 7.5** to validate the image pipeline on the NUC, then
-optionally jump to Section 8 to bootstrap your profile. After that, the
-next operator-facing thing to do is wait for build Step 6 (Discord bot
-read-only commands) to ship — at that point Section 9 ("Add your first
-item") will gain real instructions.
+Optionally, run **Section 8** to bootstrap your style profile (it works
+today). After that, the next operator-facing thing to do is wait for
+build Step 6 (Discord bot read-only commands) to ship — at that point
+the bot will come online and Section 9 ("Add your first item") will gain
+real instructions.
 
 If you're new to this NUC and haven't done any setup yet, start at Section 1.
 
@@ -670,7 +670,7 @@ You should see PNG cutouts of the synthetic inputs.
 - **`python3.12: command not found`** — Debian 13 ships 3.13. Either
   `apt install python3.12` if available, or fall back to `python3.13 -m venv .venv`
   and ignore the version mismatch — the code is 3.12+ and works on 3.13.
-- **`ModuleNotFoundError: No module named 'open_clip'`** — the venv isn't
+- **`ModuleNotFoundError: No module named 'transformers'`** — the venv isn't
   active or `[vision]` extras didn't install. Re-run
   `.venv/bin/pip install -e ".[dev,vision]"` and watch for errors.
 - **Tests fail with `pytesseract.TesseractNotFoundError`** — the OS binary
