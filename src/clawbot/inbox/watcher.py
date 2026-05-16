@@ -22,14 +22,22 @@ from __future__ import annotations
 import logging
 import shutil
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable, Literal, Optional, Protocol
 
+from clawbot.db.repo import WardrobeItem
 from clawbot.discord.bot import BotContext
 from clawbot.discord.cogs.items import build_item_from_draft
+from clawbot.inbox.email_parser import (
+    EmailItem,
+    ParseFailedError,
+    UnknownRetailerError,
+    parse_eml,
+)
 from clawbot.vision.draft import DraftItem
 
 logger = logging.getLogger(__name__)
@@ -48,6 +56,7 @@ _STABILITY_WINDOW_S = 5.0
 # Image extensions discover() will pick up. HEIC excluded because rembg's
 # onnx backend doesn't decode it; convert to JPG on the iPhone side first.
 _IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+_EML_EXTS = frozenset({".eml"})
 
 # Sibling sub-dirs under the inbox root that hold post-processing state.
 # Hidden so they don't pollute `ls` on the live drop folder.
@@ -55,8 +64,13 @@ _PROCESSED_SUBDIR = ".processed"
 _FAILED_SUBDIR = ".failed"
 _SKIP_TOP_DIRS = frozenset({_PROCESSED_SUBDIR, _FAILED_SUBDIR})
 
-# Step 8 scope: screenshots only. Step 9 handles email/.
-_SCAN_SUBDIRS = ("screenshots",)
+# Map each scanned sub-dir to the file extensions it accepts. Anything not
+# in this map is ignored (the operator's stray .DS_Store / .txt / .heic
+# won't get pulled in).
+_SCAN_SPEC: tuple[tuple[str, frozenset[str]], ...] = (
+    ("screenshots", _IMAGE_EXTS),
+    ("email", _EML_EXTS),
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -131,8 +145,8 @@ class Notifier(Protocol):
 def discover(inbox_dir: Path) -> list[InboxFile]:
     """Scan ``inbox_dir`` and return new ready-to-process files.
 
-    Only ``screenshots/`` is scanned in Step 8 — ``email/`` is Step 9's
-    responsibility. The result is sorted by ``(mtime, name)`` so processing
+    Scans ``screenshots/`` for images (Step 8) and ``email/`` for ``.eml``
+    files (Step 9). The result is sorted by ``(mtime, name)`` so processing
     order is deterministic and roughly FIFO.
     """
     if not inbox_dir.exists():
@@ -140,14 +154,14 @@ def discover(inbox_dir: Path) -> list[InboxFile]:
 
     candidates: list[InboxFile] = []
     now = time.time()
-    for subdir_name in _SCAN_SUBDIRS:
+    for subdir_name, allowed_exts in _SCAN_SPEC:
         subdir = inbox_dir / subdir_name
         if not subdir.is_dir():
             continue
         for child in subdir.iterdir():
             if not child.is_file():
                 continue
-            if child.suffix.lower() not in _IMAGE_EXTS:
+            if child.suffix.lower() not in allowed_exts:
                 continue
             try:
                 mtime = child.stat().st_mtime
@@ -246,6 +260,188 @@ async def process_one(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# process_email — Step 9
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def process_email(
+    ctx: BotContext,
+    file: InboxFile,
+    *,
+    ingest: IngestFn,
+    notify: Optional[Notifier] = None,
+) -> list[ProcessResult]:
+    """Expand a retailer .eml into 0..N WardrobeItem rows.
+
+    Behavior matrix:
+        - ``UnknownRetailerError`` / ``ParseFailedError`` → quarantine the
+          .eml, audit-log ``inbox_failed``, single ``:warning:`` notify,
+          return a single FAILED result.
+        - Parser produced N items → for each:
+            * If the item has image bytes: materialize to
+              ``images/raw/<uuid>.<ext>``, run the vision pipeline, then
+              ``build_item_from_draft`` overriding brand/name/price with
+              the email's parsed values.
+            * If the item has no image: insert a text-only row (no
+              embedding) and post a "no photo" notification.
+        - Per-item exceptions during ingest don't poison the others; the
+          .eml moves to .processed/ as long as parsing itself succeeded.
+    """
+    inbox_dir = ctx.config.paths.inbox_dir
+
+    try:
+        email_items = parse_eml(file.path)
+    except (UnknownRetailerError, ParseFailedError) as e:
+        logger.warning("email parse failed for %s: %s", file.path, e)
+        _move_to_failed(inbox_dir, file)
+        ctx.repo.audit.write(
+            kind="inbox_failed",
+            actor="inbox_watcher",
+            message=f"{file.path.name}: {type(e).__name__}: {e}",
+        )
+        if notify is not None:
+            await notify.post(
+                f":warning: Could not parse email `{file.path.name}` "
+                f"(`{type(e).__name__}`). Add a retailer parser or "
+                f"forward the email manually."
+            )
+        return [
+            ProcessResult(
+                file=file,
+                outcome=ProcessOutcome.FAILED,
+                error=f"{type(e).__name__}: {e}",
+            )
+        ]
+
+    results: list[ProcessResult] = []
+    for email_item in email_items:
+        results.append(
+            await _process_email_item(
+                ctx, file, email_item, ingest=ingest, notify=notify
+            )
+        )
+
+    # The .eml itself is "done" regardless of per-item outcomes — parsing
+    # succeeded, so we don't quarantine.
+    _move_to_processed(inbox_dir, file)
+    return results
+
+
+async def _process_email_item(
+    ctx: BotContext,
+    file: InboxFile,
+    email_item: EmailItem,
+    *,
+    ingest: IngestFn,
+    notify: Optional[Notifier],
+) -> ProcessResult:
+    """Persist one item from a parsed email. Two branches: with-image and text-only."""
+    if email_item.image_bytes is None:
+        return await _persist_text_only_item(ctx, file, email_item, notify=notify)
+    return await _persist_image_item(
+        ctx, file, email_item, ingest=ingest, notify=notify
+    )
+
+
+async def _persist_image_item(
+    ctx: BotContext,
+    file: InboxFile,
+    email_item: EmailItem,
+    *,
+    ingest: IngestFn,
+    notify: Optional[Notifier],
+) -> ProcessResult:
+    raw_dir = ctx.config.paths.images_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / f"{uuid.uuid4().hex}{email_item.image_ext or '.jpg'}"
+    raw_path.write_bytes(email_item.image_bytes)
+
+    try:
+        draft = ingest(raw_path, source="email", config=ctx.config)
+        item = build_item_from_draft(
+            draft, brand=email_item.brand, name=email_item.name
+        )
+        # The email's explicit price always wins over OCR — retailer emails
+        # are more reliable than OCR on a screenshot.
+        if email_item.price_usd is not None:
+            item.purchase_price_usd = email_item.price_usd
+        item.purchased_from = email_item.retailer
+        item_id = ctx.repo.items.add(item)
+        ctx.repo.items.set_embedding(item_id, draft.embedding.tolist())
+    except Exception as e:
+        logger.exception("email-item ingest failed for %s", email_item.name)
+        ctx.repo.audit.write(
+            kind="inbox_failed",
+            actor="inbox_watcher",
+            message=f"{file.path.name}: {email_item.name}: "
+                    f"{type(e).__name__}: {e}",
+        )
+        if notify is not None:
+            await notify.post(
+                f":warning: Couldn't process item `{email_item.name}` from "
+                f"`{file.path.name}`: `{type(e).__name__}: {e}`"
+            )
+        return ProcessResult(file=file, outcome=ProcessOutcome.FAILED, error=str(e))
+
+    ctx.repo.audit.write(
+        kind="inbox_ingested",
+        actor="inbox_watcher",
+        message=f"{file.path.name} -> {item_id} ({email_item.retailer})",
+    )
+    if notify is not None:
+        short = item_id[:8]
+        price_str = (
+            f" — ${email_item.price_usd:.2f}"
+            if email_item.price_usd is not None
+            else ""
+        )
+        await notify.post(
+            f":new: Added `[{short}]` from {email_item.brand} email — "
+            f"**{email_item.name or '(unnamed)'}**{price_str}"
+        )
+    return ProcessResult(file=file, outcome=ProcessOutcome.OK, item_id=item_id)
+
+
+async def _persist_text_only_item(
+    ctx: BotContext,
+    file: InboxFile,
+    email_item: EmailItem,
+    *,
+    notify: Optional[Notifier],
+) -> ProcessResult:
+    """Insert a WardrobeItem with no image. Pipeline never runs."""
+    # Without a category from Fashion-CLIP we can't pick one, so default to
+    # 'unknown' — operator fixes via /edit_item once they add a photo.
+    item = WardrobeItem(
+        category="unknown",
+        brand=email_item.brand,
+        name=email_item.name,
+        purchase_price_usd=email_item.price_usd,
+        purchased_from=email_item.retailer,
+    )
+    item_id = ctx.repo.items.add(item)
+    ctx.repo.audit.write(
+        kind="inbox_ingested_no_image",
+        actor="inbox_watcher",
+        message=f"{file.path.name} -> {item_id} ({email_item.retailer})",
+    )
+    if notify is not None:
+        short = item_id[:8]
+        price_str = (
+            f" — ${email_item.price_usd:.2f}"
+            if email_item.price_usd is not None
+            else ""
+        )
+        await notify.post(
+            f":bust_in_silhouette: Added `[{short}]` from {email_item.brand} "
+            f"(no photo) — **{email_item.name or '(unnamed)'}**{price_str}. "
+            f"Drop a photo into `inbox/screenshots/` or run "
+            f"`/edit_item {short}` to attach one."
+        )
+    return ProcessResult(file=file, outcome=ProcessOutcome.OK, item_id=item_id)
+
+
 def _move_to_processed(inbox_dir: Path, file: InboxFile) -> Path:
     """Move ``file`` into ``inbox/.processed/<source>/YYYY-MM-DD/``."""
     date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -312,12 +508,20 @@ async def sweep(
 
     report = SweepReport()
     for file in discover(ctx.config.paths.inbox_dir):
-        result = await process_one(ctx, file, ingest=ingest, notify=notify)
-        report.results.append(result)
-        if result.outcome is ProcessOutcome.OK:
-            report.ok += 1
+        if file.source == "email":
+            results = await process_email(
+                ctx, file, ingest=ingest, notify=notify
+            )
         else:
-            report.failed += 1
+            results = [
+                await process_one(ctx, file, ingest=ingest, notify=notify)
+            ]
+        for result in results:
+            report.results.append(result)
+            if result.outcome is ProcessOutcome.OK:
+                report.ok += 1
+            else:
+                report.failed += 1
 
     if on_complete is not None and report.total > 0:
         await on_complete(report)

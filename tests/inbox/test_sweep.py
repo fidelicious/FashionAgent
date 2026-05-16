@@ -78,6 +78,61 @@ async def test_sweep_does_not_revisit_processed(
 
 
 @pytest.mark.asyncio
+async def test_sweep_processes_email_alongside_screenshots(
+    ctx, stable_screenshot, fake_draft_factory, notifier
+) -> None:
+    """One sweep should pick up both a screenshot and a Quince .eml and
+    route each through its own processor."""
+    import base64
+    from email.mime.image import MIMEImage
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    stable_screenshot("cardigan.jpg")
+
+    email_dir = ctx.config.paths.inbox_dir / "email"
+    email_dir.mkdir(parents=True, exist_ok=True)
+    msg = MIMEMultipart("related")
+    msg["From"] = "orders@quince.com"
+    msg["Subject"] = "Order"
+    msg.attach(
+        MIMEText(
+            '<html><body><div class="item">'
+            '<img src="cid:i1" />'
+            '<p class="product-name">Sweater</p>'
+            '<p class="price">$59.90</p></div></body></html>',
+            "html",
+        )
+    )
+    tiny = base64.b64decode(
+        b"/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        b"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/9sAQwEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        b"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/8AAEQgAAQABAwEiAAIRAQMRAf/EAB8A"
+        b"AAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFB"
+        b"BhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldY"
+        b"WVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfI"
+        b"ycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/aAAwDAQACEQMRAD8A/v4oA//Z"
+    )
+    img = MIMEImage(tiny, _subtype="jpeg")
+    img.add_header("Content-ID", "<i1>")
+    msg.attach(img)
+
+    eml = email_dir / "order.eml"
+    eml.write_bytes(msg.as_bytes())
+    import os, time
+    past = time.time() - 30
+    os.utime(eml, (past, past))
+
+    report = await sweep(
+        ctx,
+        ingest=lambda p, **kw: fake_draft_factory(p),
+        notify=notifier,
+    )
+    assert report.ok == 2  # 1 screenshot + 1 item from email
+    assert ctx.repo.items.count() == 2
+
+
+@pytest.mark.asyncio
 async def test_sweep_calls_on_complete_when_nonempty(
     ctx: BotContext, stable_screenshot, fake_draft_factory
 ) -> None:
