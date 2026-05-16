@@ -150,8 +150,22 @@ def _compute_text_embeddings() -> dict[str, Any]:
             max_length=77,
         )
         text_inputs = {k: v.to("cpu") for k, v in text_inputs.items()}
-        embs = model.get_text_features(**text_inputs).detach().cpu().numpy().astype(np.float32)
-
+        # get_text_features() returns a ModelOutput wrapper (not a plain
+        # tensor) in some transformers versions.  Go through text_model +
+        # text_projection directly — same pattern as the image path.
+        if hasattr(model, "text_model") and hasattr(model, "text_projection"):
+            text_out = model.text_model(
+                input_ids=text_inputs.get("input_ids"),
+                attention_mask=text_inputs.get("attention_mask"),
+            )
+            # text_out[1] is pooler_output (CLS representation).
+            pooled = text_out[1]
+            raw = model.text_projection(pooled)
+        else:
+            raw = model.get_text_features(**text_inputs)
+            if not isinstance(raw, torch.Tensor):
+                raw = raw[1] if hasattr(raw, "__getitem__") else raw.pooler_output
+        embs = raw.detach().cpu().numpy().astype(np.float32)
     # L2-normalize each row.
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
