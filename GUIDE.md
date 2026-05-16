@@ -609,9 +609,10 @@ to build Step 13 (operator dashboard).
 
 After build Step 5, the image pipeline (`clawbot.vision.ingest_image`)
 exists as a callable library — raw image path → cutout PNG, color palette,
-Fashion-CLIP embedding, zero-shot attributes, optional OCR. The Discord
-ingest path is still Step 7 work, but you can already prove the pipeline
-runs end-to-end on your NUC hardware by running its integration test suite.
+Fashion-CLIP embedding, zero-shot attributes, optional OCR. Build Step 7
+wired it into Discord via `/add_item`, but this section's standalone
+integration tests stay useful for confirming the pipeline works on NUC
+hardware before involving Discord/Ollama.
 
 This section is what to do **once**, on the NUC, to confirm Step 5 is real.
 
@@ -690,8 +691,8 @@ The assertions are structural (embedding shape, color hex format,
 classification category in the expected set, OCR present/absent per source
 type). They are *not* semantic — synthetic blue/black/white blobs won't
 score well against Fashion-CLIP; the threshold in the integration `cfg`
-fixture is intentionally loose. Semantic accuracy gets validated manually
-on real photos during build Step 6/7.
+fixture is intentionally loose. Semantic accuracy gets validated by
+running `/add_item` on real photos in Section 9.
 
 Also confirm the cutout files were written:
 
@@ -725,8 +726,8 @@ You should see PNG cutouts of the synthetic inputs.
 
 ## 8. Bootstrap your profile
 
-> ✅ **Works today** (build Step 4 wired the profile module). The full
-> Discord-driven flow (`/profile set ...`) lands in build Step 6.
+> ✅ **Works today** (build Step 4 wired the profile module; build
+> Step 6 added the `/profile set` slash command).
 
 You can populate the profile by editing
 `config/profile.bootstrap.example.yaml`, copying it to
