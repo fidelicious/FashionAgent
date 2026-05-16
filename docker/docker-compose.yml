@@ -16,10 +16,10 @@ services:
     image: ollama/ollama:latest
     container_name: clawbot-ollama
     restart: unless-stopped
-    # NOTE: not exposing port to host by default. clawbot reaches it over the
-    # internal Docker network at http://ollama:11434. Uncomment to expose for debugging.
-    # ports:
-    #   - "127.0.0.1:11434:11434"
+    # NOTE: port exposed to localhost so you can test the API from the NUC shell.
+    # clawbot reaches it over the internal Docker network at http://ollama:11434.
+    ports:
+      - "127.0.0.1:11434:11434"
     volumes:
       # Model weights — large files; keep them on local SSD
       - ../models/ollama:/root/.ollama

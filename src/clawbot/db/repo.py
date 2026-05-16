@@ -437,21 +437,28 @@ class ItemsRepo:
         if len(vector) != 512:
             raise ValueError(f"embedding must be 512-dim, got {len(vector)}")
         exclude_ids = exclude_ids or []
-        # sqlite-vec MATCH operator with LIMIT k.
-        # Inner SELECT returns (item_id, distance); we LEFT JOIN to filter
-        # deleted rows and exclude_ids.
+        # vec0 forbids WHERE constraints on auxiliary columns inside a KNN
+        # query, so we run the MATCH alone in a CTE and apply soft-delete /
+        # exclude_ids filters in the outer SELECT. The KNN over-fetches by a
+        # buffer so the filters can't starve the LIMIT.
         ph = ",".join("?" for _ in exclude_ids) if exclude_ids else "''"
+        knn_k = k + len(exclude_ids) + 50
         sql = f"""
-            SELECT v.item_id, v.distance
-              FROM wardrobe_items_vec v
-              JOIN wardrobe_items i ON i.id = v.item_id
-             WHERE v.embedding MATCH ?
-               AND k = ?
-               AND i.deleted_at IS NULL
-               AND v.item_id NOT IN ({ph})
-          ORDER BY v.distance
+            WITH knn AS MATERIALIZED (
+                SELECT item_id, distance
+                  FROM wardrobe_items_vec
+                 WHERE embedding MATCH ?
+                   AND k = ?
+            )
+            SELECT knn.item_id, knn.distance
+              FROM knn
+              JOIN wardrobe_items i ON i.id = knn.item_id
+             WHERE i.deleted_at IS NULL
+               AND knn.item_id NOT IN ({ph})
+          ORDER BY knn.distance
+             LIMIT ?
         """
-        params: list[Any] = [json.dumps(vector), k, *exclude_ids]
+        params: list[Any] = [json.dumps(vector), knn_k, *exclude_ids, k]
         rows = self._conn.execute(sql, params).fetchall()
         return [(r["item_id"], float(r["distance"])) for r in rows]
 

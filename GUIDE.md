@@ -13,18 +13,48 @@ is included, every common failure has a Troubleshooting note.
 
 ## Status of this guide
 
-This is the **foundation pass**. As of the current commit:
+This is a **living document** that grows as the V1 build progresses. The
+implementation has 15 build steps; the GUIDE has 15 operator sections that
+roughly mirror them but are not identical. As of the current branch
+`main` (build Steps 1–5 complete, branch `feat/image-pipeline` merged):
 
-- ✅ Sections **1–6** are complete and exercisable today.
-- ⚠️ Section **7** (start clawbot) will partially work: the container
-  builds, but most application features land in upcoming build steps.
-  Use it now to verify the build plumbing; don't expect a working bot.
-- ⏳ Sections **8–15** are placeholders that get filled in as their
-  features ship (image pipeline, Discord commands, daily push, etc.).
+- ✅ Sections **1–7** are complete and exercisable today.
+- ✅ Section **7.5** (validate the image pipeline on the NUC) is **done** —
+  all 3 integration tests pass on NUC hardware.
+- ✅ Section **8** (bootstrap your profile) works today — Step 4 wired the
+  profile module and YAML loader.
+- ⏳ Sections **9–14** are still pending future build steps. Each section
+  states *which* build step will fill it in:
+  - 9. Add your first wardrobe item → **build Step 7** (Discord write commands)
+  - 10. Auto-ingest from your phone → **build Step 8** (inbox watcher)
+  - 11. Email forwarding → **build Step 9** (email parser)
+  - 12. Daily 7am outfit push → **build Step 13**
+  - 13. Backups and restores → **build Step 14**
+  - 14. Maintenance → **build Step 14**
+- 🧰 Section **15** (Troubleshooting) grows in place.
 
 Each section ends with a **"How to verify"** subsection — never skip it. If
 verification fails, jump to the **Troubleshooting** subsection at the end of
 that same section before moving on.
+
+---
+
+## Where you are now
+
+If you've followed this GUIDE on your NUC (`fidelicious@10.0.0.85`,
+`~/FashionAgent`), you've already completed sections 1–7.5. The clawbot
+container runs as a stub; Ollama serves the LLM; Discord knows about your
+bot (it appears offline because the bot loop doesn't exist yet — that
+lands in build Step 6). The image pipeline integration tests all pass on
+the NUC (build Step 5 verified ✅).
+
+Optionally, run **Section 8** to bootstrap your style profile (it works
+today). After that, the next operator-facing thing to do is wait for
+build Step 6 (Discord bot read-only commands) to ship — at that point
+the bot will come online and Section 9 ("Add your first item") will gain
+real instructions.
+
+If you're new to this NUC and haven't done any setup yet, start at Section 1.
 
 ---
 
@@ -37,6 +67,7 @@ that same section before moving on.
 5. [Fill in `secrets/.env`](#5-fill-in-secretsenv)
 6. [Start Ollama and pull the models](#6-start-ollama-and-pull-the-models)
 7. [Start the clawbot container](#7-start-the-clawbot-container)
+7.5. [Validate the image pipeline on the NUC](#75-validate-the-image-pipeline-on-the-nuc)
 8. [Bootstrap your profile](#8-bootstrap-your-profile)
 9. [Add your first wardrobe item](#9-add-your-first-wardrobe-item)
 10. [Set up auto-ingest from your phone](#10-set-up-auto-ingest-from-your-phone)
@@ -204,8 +235,8 @@ Pick one of the two options:
 If you've pushed the repo to GitHub or another remote:
 
 ```bash
-mkdir -p ~/clawbot
-cd ~/clawbot
+mkdir -p ~/FashionAgent
+cd ~/FashionAgent
 git clone <your-remote-url> .
 ```
 
@@ -219,7 +250,7 @@ rsync -av --delete \
     --exclude='__pycache__' \
     --exclude='.venv' \
     "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Projects/FashionAgent/" \
-    "you@192.168.1.42:/home/you/clawbot/"
+    "fidelicious@10.0.0.85:/home/fidelicious/FashionAgent/"
 ```
 
 This copies the source. Re-run it after any edit on the Mac.
@@ -230,7 +261,7 @@ These directories are **not in git** (they're listed in `.gitignore`) so you
 need to create them explicitly. They live alongside the source on the NUC.
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 mkdir -p db images/{raw,cutouts,final,products,outfits} \
          inbox/{screenshots,email} \
          logs models backups secrets
@@ -247,7 +278,7 @@ chmod 700 secrets
 ### How to verify
 
 ```bash
-ls -la ~/clawbot
+ls -la ~/FashionAgent
 ```
 
 You should see the source files (`pyproject.toml`, `docker/`, `src/`, etc.)
@@ -256,7 +287,7 @@ plus the runtime dirs you just made. `secrets/` should show `drwx------`.
 ### Troubleshooting
 
 - **rsync says "permission denied"** — make sure your user owns
-  `/home/you/clawbot` on the NUC: `sudo chown -R you:you /home/you/clawbot`.
+  `/home/fidelicious/FashionAgent` on the NUC: `sudo chown -R fidelicious:fidelicious /home/fidelicious/FashionAgent`.
 - **`mkdir` complains the directory already exists** — that's fine, the `-p`
   flag makes it idempotent.
 
@@ -358,7 +389,7 @@ This file holds the Discord token + IDs from Section 4. It is **never
 committed to git**.
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 cp secrets/.env.example secrets/.env
 chmod 600 secrets/.env
 nano secrets/.env       # or vim, or your editor of choice
@@ -407,7 +438,7 @@ Ollama is the LLM runtime. We use the official image; nothing custom.
 ### Boot Ollama
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 docker compose -f docker/docker-compose.yml up -d ollama
 ```
 
@@ -447,8 +478,7 @@ docker exec -it clawbot-ollama ollama list
 You should see both models listed.
 
 ```bash
-docker exec -it clawbot-ollama \
-    curl -s http://localhost:11434/api/generate \
+curl -s http://localhost:11434/api/generate \
     -d '{"model":"gemma3:1b","prompt":"say hi","stream":false}' \
     | head -c 200
 ```
@@ -464,7 +494,7 @@ of idle, the model unloads (we set `OLLAMA_KEEP_ALIVE=5m` in compose).
   `docker compose -f docker/docker-compose.yml ps` shows the state. If it
   says "Exited", `docker compose -f docker/docker-compose.yml logs ollama`
   shows why. Common cause: the `models/ollama` volume isn't writable.
-  Fix: `chmod 755 ~/clawbot/models/ollama`.
+  Fix: `chmod 755 ~/FashionAgent/models/ollama`.
 - **`ollama pull` hangs at 0%** — your DNS isn't resolving. Try
   `docker exec -it clawbot-ollama ping -c 1 registry.ollama.ai`.
 - **Generation is extremely slow (>2 minutes)** — your CPU is heavily
@@ -475,19 +505,24 @@ of idle, the model unloads (we set `OLLAMA_KEEP_ALIVE=5m` in compose).
 
 ## 7. Start the clawbot container
 
-> **Foundation-pass note:** As of the current commit, `clawbot.main` is a
-> placeholder; the full Discord bot, FastAPI server, and image worker
-> aren't wired up yet. Running this now verifies the **build** is healthy.
-> The bot will *not* respond in Discord yet — that lands in build Step 6.
+> **Status note (post-Step-5):** `clawbot.main` is still a placeholder —
+> running this verifies the build plumbing is healthy. The container does
+> not yet host the image pipeline at runtime (the Dockerfile currently
+> installs the base deps only, not the `[vision]` extras). To exercise the
+> image pipeline end-to-end on the NUC right now, jump to Section 7.5
+> instead. Section 7's container will get the Discord bot in build Step 6
+> and the image worker integration in build Step 8.
 
 ### Build the image
 
-The first build pulls Python 3.12 + system libraries + ~2 GB of pip
-dependencies (rembg, torch, etc.). It takes 10–20 minutes on this CPU.
-Subsequent builds are fast thanks to layer caching.
+The first build pulls Python 3.12 + system libraries + the base Python
+dependencies. Without `[vision]` extras the image is ~500 MB and builds
+in ~5 minutes. When the Dockerfile gains the `[vision]` extras in build
+Step 8 (image worker), expect +2 GB of pip downloads and 10–20 minutes
+the first time on this CPU.
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 docker compose -f docker/docker-compose.yml build clawbot
 ```
 
@@ -531,11 +566,130 @@ When build Step 6 (Discord bot) lands, this section will gain:
 
 ---
 
+## 7.5. Validate the image pipeline on the NUC
+
+After build Step 5, the image pipeline (`clawbot.vision.ingest_image`)
+exists as a callable library — raw image path → cutout PNG, color palette,
+Fashion-CLIP embedding, zero-shot attributes, optional OCR. The Discord
+ingest path is still Step 7 work, but you can already prove the pipeline
+runs end-to-end on your NUC hardware by running its integration test suite.
+
+This section is what to do **once**, on the NUC, to confirm Step 5 is real.
+
+### Get the Step-5 branch onto the NUC
+
+If you set up the NUC from `main`/`feat/foundation`, you need the
+`feat/image-pipeline` branch now. Pick whichever transport you've been using:
+
+```bash
+cd ~/FashionAgent
+git fetch origin
+git checkout feat/image-pipeline
+git pull
+```
+
+If you haven't pushed `feat/image-pipeline` to a remote, rsync from the Mac:
+
+```bash
+# Run on the Mac:
+rsync -av --delete \
+    --exclude='.git' --exclude='__pycache__' \
+    --exclude='.venv' --exclude='.worktrees' \
+    "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Projects/FashionAgent/" \
+    "fidelicious@10.0.0.85:/home/fidelicious/FashionAgent/"
+```
+
+### Why we need a venv on Debian 13
+
+Debian 13 ships Python 3.13 with [PEP 668](https://peps.python.org/pep-0668/)
+protection — `pip install` against the system interpreter is blocked with
+"externally-managed-environment" by design. We make a project-local
+virtualenv to keep the dependency install reproducible and reversible.
+
+(Note: this is *not* the production runtime. Production runs inside Docker.
+This venv exists only to let you run the integration tests against real
+Fashion-CLIP / rembg / Tesseract weights on the NUC hardware.)
+
+### Make the venv and install dependencies
+
+```bash
+cd ~/FashionAgent
+sudo apt install -y python3.12-venv tesseract-ocr
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[dev,vision]"
+```
+
+- `tesseract-ocr` is the OS binary that `pytesseract` shells out to. The
+  Python wrapper is in `[vision]`; the binary isn't.
+- `python3.12-venv` is needed because the project pins Python 3.12 in
+  `pyproject.toml`. If `python3.12` isn't installed, `apt install python3.12`
+  first.
+- `[dev,vision]` pulls pytest + ~2 GB of torch wheels. On the i5-3427U
+  this is 10–20 minutes the first time.
+
+### Run the integration tests
+
+The first run downloads model weights (~600 MB Fashion-CLIP + ~5 MB rembg
+u2netp) into `~/.cache/huggingface/` and `~/.u2net/`. Plan for ~5 minutes
+on first run; subsequent runs are seconds.
+
+```bash
+.venv/bin/pytest -m integration tests/vision/integration -v
+```
+
+### How to verify
+
+You should see 3 tests pass:
+
+- `test_ingest_upload_structurally_valid`
+- `test_ingest_email_structurally_valid`
+- `test_ingest_screenshot_runs_ocr`
+
+The assertions are structural (embedding shape, color hex format,
+classification category in the expected set, OCR present/absent per source
+type). They are *not* semantic — synthetic blue/black/white blobs won't
+score well against Fashion-CLIP; the threshold in the integration `cfg`
+fixture is intentionally loose. Semantic accuracy gets validated manually
+on real photos during build Step 6/7.
+
+Also confirm the cutout files were written:
+
+```bash
+ls -la /tmp/pytest-of-fidelicious/pytest-*/test_ingest_*/images/cutouts/
+```
+
+You should see PNG cutouts of the synthetic inputs.
+
+### Troubleshooting
+
+- **`pip install` fails with `externally-managed-environment`** — you're
+  installing into system Python instead of the venv. Make sure
+  `source .venv/bin/activate` ran first (or use `.venv/bin/pip` directly).
+- **`python3.12: command not found`** — Debian 13 ships 3.13. Either
+  `apt install python3.12` if available, or fall back to `python3.13 -m venv .venv`
+  and ignore the version mismatch — the code is 3.12+ and works on 3.13.
+- **`ModuleNotFoundError: No module named 'transformers'`** — the venv isn't
+  active or `[vision]` extras didn't install. Re-run
+  `.venv/bin/pip install -e ".[dev,vision]"` and watch for errors.
+- **Tests fail with `pytesseract.TesseractNotFoundError`** — the OS binary
+  is missing. `sudo apt install tesseract-ocr`.
+- **First run hangs at "Downloading model"** — slow HuggingFace mirror or
+  no network. Try `curl -I https://huggingface.co` to confirm DNS/connectivity.
+- **NUC ran out of RAM during integration test** — `free -h` to confirm.
+  The 1B Gemma model in Ollama + Fashion-CLIP + rembg is tight at 8 GB.
+  Stop Ollama temporarily: `docker compose -f docker/docker-compose.yml stop ollama`,
+  re-run the test, then start it again.
+
+---
+
 ## 8. Bootstrap your profile
 
-> ⏳ **Skeleton.** Filled in when build Step 6 (Discord bot) lands. Until then:
+> ✅ **Works today** (build Step 4 wired the profile module). The full
+> Discord-driven flow (`/profile set ...`) lands in build Step 6.
 
-You can already populate the profile by editing
+You can populate the profile by editing
 `config/profile.bootstrap.example.yaml`, copying it to
 `config/profile.bootstrap.yaml`, and running:
 
@@ -549,50 +703,74 @@ docker exec -it clawbot \
 The script tells you which fields it applied. Idempotent — re-run after
 edits without harm.
 
-When the Discord bot is wired up, the same effect will be achievable via
-`/profile set <field> <value>` slash commands.
+### How to verify
+
+```bash
+docker exec -it clawbot \
+    sqlite3 /data/db/clawbot.db "SELECT name, skin_undertone, comfort_vs_style FROM user_profile;"
+```
+
+You should see the values from your YAML. Empty fields show as blank.
+
+### Troubleshooting
+
+- **`sqlite3: command not found` inside the container** — the foundation
+  image doesn't ship sqlite3. Inspect from the host instead:
+  `sqlite3 ~/FashionAgent/db/clawbot.db "SELECT * FROM user_profile;"`.
+- **`UNIQUE constraint failed: user_profile.id`** — the script tried to
+  insert a second row. The bootstrap is `INSERT OR REPLACE` so this
+  shouldn't happen; if it does, check that the migration ran:
+  `sqlite3 ~/FashionAgent/db/clawbot.db ".tables"` should show
+  `schema_migrations` and `user_profile` among others.
+
+When the Discord bot lands (build Step 6), the same effect will be
+achievable via `/profile set <field> <value>` slash commands.
 
 ---
 
 ## 9. Add your first wardrobe item
 
-> ⏳ **Skeleton.** Filled in with build Step 5 (image pipeline) + Step 7
-> (Discord write commands). Until then there's no end-to-end ingest path.
+> ⏳ **Pending build Step 7** (Discord write commands). The image pipeline
+> exists today (validated in Section 7.5), but the path from "user uploads
+> a photo in Discord" → "draft persisted to wardrobe_items" requires the
+> Discord bot's `/add_item` slash command. Section will be filled in then.
 
 ---
 
 ## 10. Set up auto-ingest from your phone
 
-> ⏳ **Skeleton.** Filled in with build Step 8 (inbox watcher). Until then:
+> ⏳ **Pending build Step 8** (inbox watcher).
 
 The plan is two flavors of "drop file → bot processes it":
 
 - **Screenshots from your phone** — AirDrop or share-sheet to a Mac
-  folder, rsync that folder to `~/clawbot/inbox/screenshots/` on the NUC
-  every minute via cron. The watcher picks files up within 60 s.
+  folder, rsync that folder to `~/FashionAgent/inbox/screenshots/` on the NUC
+  every minute via cron. The watcher picks files up within 60 s and routes
+  them through Section 7.5's image pipeline.
 - **Forwarded retailer emails** — Gmail filter forwards order/sale mails
   to a folder; getmail or imapfilter on the NUC writes the `.eml` files
-  into `~/clawbot/inbox/email/`. Same watcher, same outcome.
+  into `~/FashionAgent/inbox/email/`. Same watcher, same outcome.
 
-Detailed commands land here when Step 8 ships.
+Detailed commands land here when build Step 8 ships.
 
 ---
 
 ## 11. Set up email forwarding for retailer mails
 
-> ⏳ **Skeleton.** Filled in with build Step 9 (email parser).
+> ⏳ **Pending build Step 9** (email parser).
 
 ---
 
 ## 12. Verify the daily 7am outfit push
 
-> ⏳ **Skeleton.** Filled in with build Step 13 (daily push job).
+> ⏳ **Pending build Step 13** (daily push job). Requires build Steps 10–12
+> (outfit scorer, LLM wrapper, collage) first.
 
 ---
 
 ## 13. Backups and restores
 
-> ⏳ **Skeleton.** Filled in with build Step 14 (backup script). Outline:
+> ⏳ **Pending build Step 14** (backup script). Outline:
 >
 > - Nightly job at 02:30 tarballs `db/` + `images/` into `backups/`.
 > - Retention is 14 days (configurable via `backup.retain_days` in `clawbot.yaml`).
@@ -603,21 +781,38 @@ Detailed commands land here when Step 8 ships.
 
 ## 14. Maintenance
 
-> ⏳ **Skeleton.** Filled in alongside Step 14. Outline:
+> ⏳ **Pending build Step 14**. Outline:
 >
 > - Update LLM: `docker exec clawbot-ollama ollama pull gemma3:1b`.
 > - Update Python deps: edit `pyproject.toml`, then
 >   `docker compose build --no-cache clawbot`.
-> - Inspect DB: `sqlite3 ~/clawbot/db/clawbot.db` then `.tables`, `.schema`,
+> - Inspect DB: `sqlite3 ~/FashionAgent/db/clawbot.db` then `.tables`, `.schema`,
 >   `SELECT * FROM user_profile;` etc.
 > - Free disk: `docker system prune -a` (removes unused images), then
->   inspect `~/clawbot/images/raw/` for items that already have cutouts.
+>   inspect `~/FashionAgent/images/raw/` for items that already have cutouts.
 
 ---
 
 ## 15. Troubleshooting cookbook
 
 This section grows over time. Check it before opening a fresh investigation.
+
+### "`pip install` says `externally-managed-environment`"
+
+Debian 13 ships Python with PEP 668 protection — the system interpreter
+refuses to install user packages. You are running `pip install` against
+system Python instead of the project venv.
+
+1. Make sure you've created the venv: `cd ~/FashionAgent && python3.12 -m venv .venv`.
+2. Activate it: `source .venv/bin/activate` (your prompt should now start
+   with `(.venv)`).
+3. Re-run: `pip install -e ".[dev,vision]"`.
+
+Or invoke the venv's pip directly without activating:
+`~/FashionAgent/.venv/bin/pip install -e ".[dev,vision]"`.
+
+Do **not** pass `--break-system-packages` — that pollutes the system
+Python and can break Debian's own tools.
 
 ### "Ollama is too slow"
 
@@ -653,14 +848,14 @@ The 8 GB budget is tight when Fashion-CLIP + rembg are both resident.
 
 1. `df -h ~` to confirm.
 2. `docker system prune -a` (frees old images/containers/builds).
-3. `du -sh ~/clawbot/*` — if `images/raw/` is the culprit, its files are
+3. `du -sh ~/FashionAgent/*` — if `images/raw/` is the culprit, its files are
    originals you no longer strictly need (cutouts and final thumbnails
    live elsewhere). Plan: a Step-14 retention policy will auto-thin.
 
 ### "I want to start over from scratch"
 
 ```bash
-cd ~/clawbot
+cd ~/FashionAgent
 docker compose -f docker/docker-compose.yml down
 rm -rf db/* images/*/* logs/* backups/* models/fashion-clip/*
 # DO NOT delete models/ollama unless you want to re-download the LLM

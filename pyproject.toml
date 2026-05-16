@@ -28,10 +28,10 @@ dependencies = [
 [project.optional-dependencies]
 # Step 5+ image pipeline. Install on the NUC only, not on the dev Mac.
 vision = [
-    "rembg>=2.0.57",
+    "rembg[cpu]>=2.0.57",
     "Pillow>=10.3",
     "colorthief>=0.2.1",
-    "open-clip-torch>=2.24",      # Fashion-CLIP loads via this lib
+    "transformers>=4.40",           # Fashion-CLIP loads via this lib
     "torch>=2.2,<3",
     "torchvision>=0.17",
     "pytesseract>=0.3.10",
@@ -68,6 +68,12 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "pre-commit>=3.7",
+    # Unit-test deps for the vision package. The heavy stages (rembg, torch,
+    # pytesseract) live in the [vision] extra and are mocked in unit tests,
+    # but synthetic-image fixtures and fake-embedding arrays still need these.
+    "numpy>=1.26",
+    "Pillow>=10.3",
+    "colorthief>=0.2.1",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -99,3 +105,13 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 files = ["src", "tests"]
+# Pydantic's mypy plugin teaches strict mode that fields with defaults are
+# optional in model constructors — without it every test that builds a
+# ClawbotConfig() with partial kwargs lights up red.
+plugins = ["pydantic.mypy"]
+
+# Vision deps live in the [vision] extra and don't ship type stubs.
+# We don't want type-checks to fail on hosts without the extra installed.
+[[tool.mypy.overrides]]
+module = ["colorthief", "rembg", "pytesseract", "transformers", "torch"]
+ignore_missing_imports = true

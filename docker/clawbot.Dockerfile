@@ -44,6 +44,10 @@ WORKDIR /app
 COPY --chown=clawbot:clawbot pyproject.toml /app/
 COPY --chown=clawbot:clawbot README.md /app/
 
+# Create a minimal stub so pip can resolve the editable install without
+# the full source tree. The real src/ is copied below and overwrites this.
+RUN mkdir -p src/clawbot && touch src/clawbot/__init__.py
+
 # Install runtime + chosen optional groups. Image pipeline groups are heavy
 # (~2 GB of torch wheels) — only install what V1 needs.
 RUN pip install --no-cache-dir --upgrade pip \
