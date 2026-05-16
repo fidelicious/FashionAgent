@@ -168,6 +168,24 @@ class FeaturesConfig(BaseModel):
     calendar: bool = False
 
 
+class DiscordConfig(BaseModel):
+    """Non-secret Discord knobs.
+
+    The bot token, user ID, guild ID, and channel ID are loaded separately
+    from ``secrets/.env`` by ``clawbot.discord_secrets`` — they are never
+    written to the YAML so the config file stays safe to commit.
+
+    ``enabled`` defaults to False so that tests and the foundation-pass
+    container don't try to dial Discord without a real token.
+    """
+
+    enabled: bool = False
+    sync_commands_on_startup: bool = True
+    unauthorized_reply: str = (
+        "Sorry, this bot is private. The operator has been notified."
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level config
 # ─────────────────────────────────────────────────────────────────────────────
@@ -185,6 +203,7 @@ class ClawbotConfig(BaseModel):
     health: HealthConfig = Field(default_factory=HealthConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    discord: DiscordConfig = Field(default_factory=DiscordConfig)
 
     model_config = {
         # Reject unknown YAML keys — surfaces typos immediately rather than
