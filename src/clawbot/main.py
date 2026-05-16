@@ -24,6 +24,10 @@ from clawbot.db import Repo, connect, run_migrations
 from clawbot.discord.bot import BotContext, build_bot
 from clawbot.discord_secrets import DiscordSecrets, load_discord_secrets
 
+# clawbot.inbox.* and clawbot.scheduler pull in APScheduler. Foundation-pass
+# operators (discord.enabled=false) shouldn't need that extras group, so the
+# imports happen inside ``_run_bot`` below — see _setup_hook().
+
 logger = logging.getLogger(__name__)
 
 # Cog modules loaded as discord.py extensions on startup. Order doesn't
@@ -61,8 +65,16 @@ def _idle_until_signal() -> None:
 
 
 async def _run_bot(ctx: BotContext, secrets: DiscordSecrets) -> None:
-    """Async bootstrap: load cogs, optionally sync commands, run forever."""
+    """Async bootstrap: load cogs, start the scheduler, run forever.
+
+    The scheduler is built *after* the bot exists so its jobs can post to
+    the operator's channel via ``ChannelNotifier``. We stash the scheduler
+    on the bot so close-time cleanup is one call.
+    """
     import discord
+
+    from clawbot.inbox.notify import ChannelNotifier, NullNotifier, Notifier
+    from clawbot.scheduler import build_scheduler
 
     bot = build_bot(ctx)
 
@@ -75,8 +87,41 @@ async def _run_bot(ctx: BotContext, secrets: DiscordSecrets) -> None:
             await bot.tree.sync(guild=guild)
             logger.info("Synced slash commands to guild %s", secrets.guild_id)
 
+        notifier: Notifier = (
+            ChannelNotifier(bot=bot, channel_id=secrets.channel_id)
+            if secrets.channel_id is not None
+            else NullNotifier()
+        )
+        scheduler = build_scheduler(ctx, notifier=notifier)
+        scheduler.start()
+        bot._clawbot_scheduler = scheduler  # type: ignore[attr-defined]
+        logger.info(
+            "Scheduler started: inbox_sweep every %ds, disk_check at %r",
+            ctx.config.schedule.inbox_sweep_seconds,
+            ctx.config.schedule.disk_check,
+        )
+
+    async def _on_close() -> None:
+        sched = getattr(bot, "_clawbot_scheduler", None)
+        if sched is not None and sched.running:
+            sched.shutdown(wait=False)
+            logger.info("Scheduler stopped.")
+
     bot.setup_hook = _setup_hook  # type: ignore[assignment]
+    bot.close = _wrap_close(bot.close, _on_close)  # type: ignore[assignment]
     await bot.start(secrets.token)
+
+
+def _wrap_close(original_close, hook):
+    """Chain an async cleanup hook in front of ``Bot.close``."""
+
+    async def _close() -> None:
+        try:
+            await hook()
+        finally:
+            await original_close()
+
+    return _close
 
 
 def main() -> None:
