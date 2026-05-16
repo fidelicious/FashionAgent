@@ -16,16 +16,17 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`main` (build Steps 1–5 complete, branch `feat/image-pipeline` merged):
+`feat/discord-bot` (build Steps 1–7 complete):
 
-- ✅ Sections **1–7** are complete and exercisable today.
-- ✅ Section **7.5** (validate the image pipeline on the NUC) is **done** —
-  all 3 integration tests pass on NUC hardware.
-- ✅ Section **8** (bootstrap your profile) works today — Step 4 wired the
-  profile module and YAML loader.
-- ⏳ Sections **9–14** are still pending future build steps. Each section
-  states *which* build step will fill it in:
-  - 9. Add your first wardrobe item → **build Step 7** (Discord write commands)
+- ✅ Sections **1–9** are complete and exercisable today.
+- ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
+  integration tests pass on NUC hardware.
+- ✅ Section **8** (bootstrap your profile) — Step 4 wired the profile
+  module and YAML loader; Step 6 added `/profile set` in Discord.
+- ✅ Section **9** (add your first wardrobe item) — Step 7 shipped
+  `/add_item`, `/edit_item`, `/forget_item` and the operator-only
+  whitelist.
+- ⏳ Sections **10–14** are still pending future build steps:
   - 10. Auto-ingest from your phone → **build Step 8** (inbox watcher)
   - 11. Email forwarding → **build Step 9** (email parser)
   - 12. Daily 7am outfit push → **build Step 13**
@@ -42,17 +43,26 @@ that same section before moving on.
 ## Where you are now
 
 If you've followed this GUIDE on your NUC (`fidelicious@10.0.0.85`,
-`~/FashionAgent`), you've already completed sections 1–7.5. The clawbot
-container runs as a stub; Ollama serves the LLM; Discord knows about your
-bot (it appears offline because the bot loop doesn't exist yet — that
-lands in build Step 6). The image pipeline integration tests all pass on
-the NUC (build Step 5 verified ✅).
+`~/FashionAgent`), you've already completed sections 1–7.5. To bring the
+bot online on the latest branch:
 
-Optionally, run **Section 8** to bootstrap your style profile (it works
-today). After that, the next operator-facing thing to do is wait for
-build Step 6 (Discord bot read-only commands) to ship — at that point
-the bot will come online and Section 9 ("Add your first item") will gain
-real instructions.
+1. Pull the `feat/discord-bot` branch (or whichever branch carries Steps
+   6–7), rebuild the clawbot image:
+
+   ```bash
+   git pull
+   docker compose -f docker/docker-compose.yml build clawbot
+   docker compose -f docker/docker-compose.yml up -d clawbot
+   ```
+
+2. Run **Section 8** to bootstrap your style profile from YAML (still the
+   fastest way to fill 40+ fields).
+
+3. Run **Section 9** to add your first wardrobe item with `/add_item`,
+   confirm the draft attributes, and start building the wardrobe.
+
+After that, the next operator-facing milestone is build Step 8 (inbox
+watcher / auto-ingest) — Section 10 will gain real instructions then.
 
 If you're new to this NUC and haven't done any setup yet, start at Section 1.
 
@@ -341,9 +351,14 @@ ID** option. We'll use this in 4.4.
 You need three IDs. With Developer Mode on (4.2):
 
 - **Your user ID** — right-click your username (top-right or in any
-  message), choose **Copy User ID**.
+  message), choose **Copy User ID**. **This is the operator
+  whitelist**: any slash command from another user is silently refused
+  (with an "this bot is private" ephemeral reply) and logged to
+  `audit_log` with kind `discord_unauthorized`.
 - **Your server (guild) ID** — right-click the server icon in the left
-  sidebar, choose **Copy Server ID**.
+  sidebar, choose **Copy Server ID**. The bot registers its slash
+  commands against this guild on startup so they appear instantly,
+  instead of waiting up to an hour for global propagation.
 - **The channel ID** for daily outfit pushes — pick any text channel in
   your server (or create one called `#wardrobe`), right-click it, choose
   **Copy Channel ID**.
@@ -505,13 +520,17 @@ of idle, the model unloads (we set `OLLAMA_KEEP_ALIVE=5m` in compose).
 
 ## 7. Start the clawbot container
 
-> **Status note (post-Step-5):** `clawbot.main` is still a placeholder —
-> running this verifies the build plumbing is healthy. The container does
-> not yet host the image pipeline at runtime (the Dockerfile currently
-> installs the base deps only, not the `[vision]` extras). To exercise the
-> image pipeline end-to-end on the NUC right now, jump to Section 7.5
-> instead. Section 7's container will get the Discord bot in build Step 6
-> and the image worker integration in build Step 8.
+> **Status note (post-Step-7):** the Discord bot is live. With
+> `discord.enabled: true` in `config/clawbot.yaml` (already set in
+> `clawbot.example.yaml`) and `secrets/.env` filled in, `clawbot.main`
+> connects to Discord on startup, loads four cogs, and registers six
+> slash commands (`/health`, `/profile`, `/wardrobe`, `/add_item`,
+> `/edit_item`, `/forget_item`) against your guild. The image pipeline,
+> Fashion-CLIP, rembg, and Tesseract are already baked into the runtime
+> image (see the `[vision,discord,scheduler,email,llm,api]` extras in
+> `docker/clawbot.Dockerfile`), so `/add_item` works end-to-end. Daily
+> push, inbox watcher, and outfit recommendations land in build Steps
+> 8–13.
 
 ### Build the image
 
@@ -538,22 +557,42 @@ docker compose -f docker/docker-compose.yml up -d clawbot
 docker compose -f docker/docker-compose.yml logs -f clawbot
 ```
 
-### How to verify (foundation pass)
+### How to verify
 
-For now, the verification is just "the container is running and not
-crash-looping":
+1. Both containers up:
 
-```bash
-docker compose -f docker/docker-compose.yml ps
-```
+   ```bash
+   docker compose -f docker/docker-compose.yml ps
+   ```
 
-You should see both `clawbot-ollama` and `clawbot` with status
-`running` (or `restarting` briefly, then `running`).
+   You should see both `clawbot-ollama` and `clawbot` with status
+   `running`.
 
-When build Step 6 (Discord bot) lands, this section will gain:
+2. The bot announces itself in the logs:
 
-- `/health` in Discord returns green
-- `curl http://localhost:8000/healthz` returns `{"status": "ok", ...}`
+   ```bash
+   docker compose -f docker/docker-compose.yml logs clawbot | grep -E "Synced|logged in"
+   ```
+
+   Expect a line like `Synced slash commands to guild <your guild id>`.
+
+3. In Discord, type `/health` in your private server. You should see an
+   ephemeral reply (only visible to you) listing `db ✓`, `migrations ✓`,
+   `ollama ✓`. If `ollama` shows `✗`, jump back to Section 6 — the bot
+   reached Discord but can't talk to Ollama on the Docker network.
+
+4. Try `/health` from a second Discord account (a friend, an alt). The
+   bot should silently refuse with the "private" message you set in
+   `config.discord.unauthorized_reply`. The denial is also written to
+   `audit_log` with kind `discord_unauthorized` — inspect with:
+
+   ```bash
+   sqlite3 ~/FashionAgent/db/clawbot.db \
+       "SELECT ts, actor, message FROM audit_log WHERE kind='discord_unauthorized' ORDER BY ts DESC LIMIT 5;"
+   ```
+
+The FastAPI `/healthz` HTTP endpoint mentioned in earlier drafts moves
+to build Step 13 (operator dashboard).
 
 ### Troubleshooting
 
@@ -723,17 +762,90 @@ You should see the values from your YAML. Empty fields show as blank.
   `sqlite3 ~/FashionAgent/db/clawbot.db ".tables"` should show
   `schema_migrations` and `user_profile` among others.
 
-When the Discord bot lands (build Step 6), the same effect will be
-achievable via `/profile set <field> <value>` slash commands.
+You can also drive this from Discord with `/profile set <field> <value>`
+once the bot is running — but the YAML path is faster for the initial
+~40-field bootstrap. After that, use `/profile` to view and
+`/profile set` for one-off corrections.
 
 ---
 
 ## 9. Add your first wardrobe item
 
-> ⏳ **Pending build Step 7** (Discord write commands). The image pipeline
-> exists today (validated in Section 7.5), but the path from "user uploads
-> a photo in Discord" → "draft persisted to wardrobe_items" requires the
-> Discord bot's `/add_item` slash command. Section will be filled in then.
+> ✅ **Works today** (build Step 7).
+
+The flow is one slash command. The bot defers (Discord shows
+"Clawbot is thinking…") while it runs rembg + Fashion-CLIP + OCR on the
+NUC's CPU — expect 10–30 seconds on the i5-3427U the first time per
+session (the models stay warm afterward).
+
+### Add an item
+
+1. In Discord, type `/add_item` and press space.
+2. Attach a photo. On mobile Discord this opens the camera/gallery
+   picker; on desktop, drag-and-drop or paste a clipboard image.
+3. Optionally set `name` and `brand` parameters. If you skip them, the
+   bot uses what Fashion-CLIP and OCR could infer.
+4. Press enter.
+
+The bot replies with the new item's short id (first 8 chars of the
+uuid) and the draft attributes it inferred — category, subcategory,
+formality, seasons, primary color, and any price OCR could read from a
+retailer screenshot. Example:
+
+```
+✓ Added [a1b2c3d4] (unnamed) — COS
+  category: tops/cardigan
+  formality: casual
+  seasons: fall, winter
+  color: #1a2b3c
+
+Use /edit_item a1b2c3d4 <field> <value> to correct anything.
+```
+
+### Correct or rename the item
+
+Anything wrong? `/edit_item a1b2c3d4 name "Navy wool cardigan"`.
+Field names match the columns on the `wardrobe_items` table — common
+ones: `name`, `brand`, `subcategory`, `formality`, `seasons`,
+`size_on_tag`, `size_true`, `condition`, `purchase_price_usd`,
+`needs_tailoring`, `tailoring_notes`, `care`, `notes`.
+
+List fields (`seasons`, `fabric`, `pairs_well_with`,
+`avoid_pairing_with`) accept comma-separated input:
+`/edit_item a1b2c3d4 seasons "fall, winter"`.
+
+### Hide an item from recommendations
+
+`/forget_item a1b2c3d4` soft-deletes the item — it disappears from
+`/wardrobe` and won't appear in `/outfit` suggestions, but stays in the
+DB so you can audit history or recover it later from sqlite directly.
+
+### How to verify
+
+```bash
+sqlite3 ~/FashionAgent/db/clawbot.db \
+    "SELECT substr(id,1,8) AS id, category, subcategory, name, brand \
+     FROM wardrobe_items WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 5;"
+```
+
+You should see the item you just added, plus any others.
+
+### Troubleshooting
+
+- **"Clawbot is thinking…" never resolves** — the image pipeline crashed
+  inside the worker. Check
+  `docker compose logs clawbot | tail -50`. The most common cause is
+  out-of-memory while loading Fashion-CLIP: confirm
+  `image_pipeline.lazy_load_models: true` in `config/clawbot.yaml`, then
+  restart the container.
+- **`/add_item` errors with "must be an image"** — Discord rejected the
+  attachment before it reached the bot. Re-upload as JPG or PNG; HEIC
+  from iOS sometimes needs conversion.
+- **The reply says category: tops/?** — Fashion-CLIP's subcategory
+  confidence fell below the threshold
+  (`fashion_clip_confidence_threshold` in config). The item is still
+  saved with the right top-level category; fix the subcategory with
+  `/edit_item`.
 
 ---
 

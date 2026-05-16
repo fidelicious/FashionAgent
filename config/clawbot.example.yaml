@@ -81,3 +81,10 @@ features:
   feedback_learning: false       # V2 (but 👍/👎 reactions are still recorded)
   weather: false                 # V2
   calendar: false                # V3
+
+# ── Discord ────────────────────────────────────────────────────────────────
+# Token + user/guild/channel IDs live in secrets/.env, not here.
+discord:
+  enabled: true                  # set false to skip starting the bot (foundation-pass)
+  sync_commands_on_startup: true # registers slash commands against the guild on boot
+  unauthorized_reply: "Sorry, this bot is private. The operator has been notified."
