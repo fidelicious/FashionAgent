@@ -86,11 +86,20 @@ def test_discover_skips_failed_dir(tmp_path: Path) -> None:
     assert discover(inbox) == []
 
 
-def test_discover_skips_email_subdir(tmp_path: Path) -> None:
-    """email/* is Step 9 work; Step 8 must not touch it."""
+def test_discover_picks_up_eml_in_email(tmp_path: Path) -> None:
+    """Step 9 wired email/*.eml — should now be discovered with source='email'."""
     inbox = tmp_path / "inbox"
-    _touch(inbox / "email" / "receipt.eml")
-    _touch(inbox / "email" / "receipt.jpg")  # even an image in email/ is skipped
+    eml = _touch(inbox / "email" / "receipt.eml")
+    found = discover(inbox)
+    assert found == [InboxFile(path=eml, source="email")]
+
+
+def test_discover_skips_non_eml_in_email_subdir(tmp_path: Path) -> None:
+    """A stray .jpg in email/ is not what we expect there — ignore it so
+    the operator doesn't accidentally get it ingested twice with different
+    code paths."""
+    inbox = tmp_path / "inbox"
+    _touch(inbox / "email" / "spam.jpg")
     assert discover(inbox) == []
 
 

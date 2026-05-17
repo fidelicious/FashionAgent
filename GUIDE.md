@@ -16,9 +16,9 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/inbox-watcher` (build Steps 1–8 complete):
+`feat/email-parser` (build Steps 1–9 complete):
 
-- ✅ Sections **1–10** are complete and exercisable today.
+- ✅ Sections **1–11** are complete and exercisable today.
 - ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
   integration tests pass on NUC hardware.
 - ✅ Section **8** (bootstrap your profile) — Step 4 wired the profile
@@ -31,8 +31,11 @@ roughly mirror them but are not identical. As of the current branch
   `inbox/screenshots/`, the scheduler picks it up within 60 s, posts
   to the operator channel, and quarantines on failure. Hourly
   `disk_check` job also lives here.
-- ⏳ Sections **11–14** are still pending future build steps:
-  - 11. Email forwarding → **build Step 9** (email parser)
+- ✅ Section **11** (email forwarding) — Step 9 shipped the email
+  parser for **Quince**, **UNIQLO**, **H&M**: drop a `.eml` into
+  `inbox/email/` and the watcher splits it into 1..N wardrobe rows,
+  with or without inline product images.
+- ⏳ Sections **12–14** are still pending future build steps:
   - 12. Daily 7am outfit push → **build Step 13** (needs Steps 10–12)
   - 13. Backups and restores → **build Step 14**
   - 14. Maintenance → **build Step 14**
@@ -48,7 +51,7 @@ that same section before moving on.
 
 If you've followed this GUIDE on your NUC (`fidelicious@10.0.0.85`,
 `~/FashionAgent`), you've already completed sections 1–7.5. To pull the
-post-Step-8 build:
+post-Step-9 build:
 
 ```bash
 cd ~/FashionAgent
@@ -67,10 +70,13 @@ From there:
    from `config/profile.bootstrap.yaml`.
 2. Run **Section 9** to add your first item by hand with `/add_item`.
 3. Run **Section 10** to wire the phone-to-NUC rsync and let the
-   inbox watcher ingest the rest in the background.
+   inbox watcher ingest screenshots in the background.
+4. Run **Section 11** to forward retailer order/sale emails to the
+   NUC so brand + price land in your wardrobe automatically.
 
-After that, the next operator-facing milestone is build Step 9 (email
-forwarding) — Section 11 will gain real instructions then.
+After that, the next operator-facing milestone is the daily 07:00
+outfit push — that needs build Steps 10 + 11 + 12 (scorer, LLM
+wrapper, collage) before Section 12 can light up.
 
 If you're new to this NUC and haven't done any setup yet, start at Section 1.
 
@@ -972,7 +978,103 @@ in V1, so it owns this guardrail. Alerts are also written to
 
 ## 11. Set up email forwarding for retailer mails
 
-> ⏳ **Pending build Step 9** (email parser).
+> ✅ **Works today** (build Step 9 shipped the email parser).
+> V1 retailers: **Quince**, **UNIQLO**, **H&M**. Adding more is a
+> ~30-line PR (see "Add a new retailer" below).
+
+### How it works
+
+Drop a `.eml` file into `~/FashionAgent/inbox/email/`. The same
+scheduler that runs `inbox_sweep` (Section 10) picks it up within
+60 s and:
+
+1. Parses the email's `From:` header to find the retailer.
+2. Walks the HTML body for one or more product rows (name + price).
+3. Extracts the inline product image, if any, and runs it through
+   the same vision pipeline `/add_item` uses — but overrides
+   brand/name/price with the regex-extracted values (retailer email
+   data is more reliable than OCR on a screenshot).
+4. If the email has **no image** (sale alert, wishlist drop), a
+   text-only wardrobe row is inserted with the brand + price, and
+   you get a `:bust_in_silhouette:` Discord message asking you to
+   attach a photo later via `/edit_item` or by dropping one into
+   `inbox/screenshots/`.
+5. The `.eml` itself moves into `inbox/.processed/email/<date>/`.
+   Unknown senders or parse failures land in `inbox/.failed/email/`
+   with a `:warning:` notification.
+
+One multi-item order email becomes N separate wardrobe rows — you
+get one Discord message per item.
+
+### Fastest setup: Gmail → forward to NUC inbox
+
+This route needs zero extra software on the NUC. Filters at Gmail
+mark the right emails, an Apple Mail rule on your Mac saves them as
+`.eml`, and rsync delivers them.
+
+1. **In Gmail**, set up forwarding *or* a label + filter:
+   - Create label `retailer-orders`.
+   - Filter rule: `from:(@quince.com OR @uniqlo.com OR @hm.com)`
+     → "Apply label retailer-orders" + "Forward to <your Mac
+     Apple-Mail address>".
+2. **On your Mac, in Apple Mail**:
+   - Rule: "If from any of [...the same domains...] save attachment
+     to `~/Mail-Drops/clawbot-emails/`, then **Save raw message**
+     to the same folder."
+3. **Reuse the rsync cron from Section 10** but add a second line:
+   ```bash
+   * * * * * rsync -avz --remove-source-files \
+       ~/Mail-Drops/clawbot-emails/ \
+       fidelicious@10.0.0.85:~/FashionAgent/inbox/email/ \
+       >>/tmp/clawbot-rsync.log 2>&1
+   ```
+
+### Verify
+
+1. Forward a real Quince/UNIQLO/H&M confirmation to yourself.
+2. Save it via Apple Mail / Outlook / Thunderbird → "Save as → .eml".
+3. SCP it to the NUC:
+   ```bash
+   scp ~/Downloads/order-12345.eml \
+       fidelicious@10.0.0.85:~/FashionAgent/inbox/email/
+   ```
+4. Within 60 s, Discord should post a `:new:` (or `:bust_in_silhouette:`
+   if there was no image) per item in the email.
+5. Inspect the row:
+   ```bash
+   sqlite3 ~/FashionAgent/db/clawbot.db \
+       "SELECT substr(id,1,8) id, brand, name, purchase_price_usd \
+        FROM wardrobe_items ORDER BY created_at DESC LIMIT 5;"
+   ```
+
+### Add a new retailer
+
+Open
+[src/clawbot/inbox/email_parser.py](src/clawbot/inbox/email_parser.py)
+and:
+
+1. Write a `parse_<retailer>(msg, source_path) -> list[EmailItem]`
+   function. The shared helpers `_html_body`, `_inline_images`,
+   `_resolve_cid_image`, and `_parse_price` cover most cases.
+2. Register the domain in `RETAILER_PARSERS` and `_DOMAIN_TO_NAME`.
+3. Add a synthetic-fixture test in
+   [tests/inbox/test_email_parser.py](tests/inbox/test_email_parser.py)
+   that mirrors the new retailer's HTML structure.
+
+### Troubleshooting
+
+- **`.eml` keeps landing in `.failed/email/`** — check the audit log
+  for `inbox_failed` rows: a `UnknownRetailerError` means the
+  `From:` domain isn't registered; a `ParseFailedError` means the
+  retailer's template drifted and the regex needs tuning. Forward
+  one example to yourself, open the .eml in a text editor, and
+  adjust the row/name/price regex in `email_parser.py`.
+- **Wardrobe row has `category=unknown`** — that's the default for
+  text-only rows. Run `/edit_item <shortid> category=tops`
+  (or whatever the real category is) once you've attached a photo.
+- **Multi-item order produced fewer rows than expected** — the
+  retailer's HTML uses a different row delimiter than the synthetic
+  fixture. Same fix as above.
 
 ---
 
