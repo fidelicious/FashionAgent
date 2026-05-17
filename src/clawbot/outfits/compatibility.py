@@ -88,6 +88,26 @@ def compute_compatibility(items: Sequence[WardrobeItem]) -> float:
     Output:
         A float in [0.0, 1.0]. 0.5 is "neutral / no signal".
 
+    Algorithm
+    ---------
+    1. **Cosine base**: compute cosine similarity for every pair of items that
+       both have embeddings.  Map each raw cosine ∈ [-1, 1] to [0, 1] via
+       ``(cos + 1) / 2`` so that:
+         - identical vectors  → 1.0  (very compatible)
+         - orthogonal vectors → 0.5  (neutral, no signal)
+         - opposite vectors   → 0.0  (incompatible)
+       Average across all valid pairs.  Fall back to 0.5 when no pair has
+       embeddings (no visual signal available).
+
+    2. **Curated overrides**: additive adjustments on top of the base:
+         - +0.10 per item whose ``pairs_well_with`` overlaps the outfit ids
+         - −0.20 per item whose ``avoid_pairing_with`` overlaps the outfit ids
+       Using a larger penalty than bonus deliberately makes explicit clashes
+       hurt more than explicit affinities help — erring on the side of not
+       suggesting outfits the user has labelled as clashing.
+
+    3. **Clamp** to [0.0, 1.0] to satisfy the unit-interval invariant.
+
     Invariants (enforced by tests):
         - return value ∈ [0.0, 1.0]
         - identical embeddings → ≥ 0.5
@@ -95,25 +115,34 @@ def compute_compatibility(items: Sequence[WardrobeItem]) -> float:
         - pairs_well_with boost → strictly higher than baseline
         - avoid_pairing_with    → strictly lower than baseline
     """
-    # ── DELETE THIS BLOCK AND IMPLEMENT YOUR FORMULA ────────────────────────
-    # The neutral default below keeps `score_outfit` working end-to-end while
-    # you decide on the formula. It is intentionally too simple to satisfy
-    # the `test_compatibility.py` invariants — those tests are xfail until
-    # you replace this.
+    from itertools import combinations
+
     if len(items) < 2:
         return 0.5
-    return 0.5
-    # ────────────────────────────────────────────────────────────────────────
 
-    # Reference building blocks you may find useful when you implement it:
-    #
-    #   pairs = list(combinations(items, 2))
-    #   sims = [_cosine(a.embedding, b.embedding) for a, b in pairs
-    #           if a.embedding and b.embedding]
-    #   base = (sum(sims) / len(sims) + 1) / 2 if sims else 0.5
-    #
-    #   ids = {it.id for it in items}
-    #   boost  = sum(1 for it in items if set(it.pairs_well_with) & (ids - {it.id}))
-    #   penalty = sum(1 for it in items if set(it.avoid_pairing_with) & (ids - {it.id}))
-    #
-    #   return max(0.0, min(1.0, base + 0.10 * boost - 0.20 * penalty))
+    # ── Step 1: embedding-based cosine base ─────────────────────────────────
+    # Only include pairs where both items have a non-empty embedding.  Items
+    # added before the image pipeline ran will have embedding=None and are
+    # simply ignored in the average rather than dragging it toward 0.
+    pairs = list(combinations(items, 2))
+    sims = [
+        _cosine(a.embedding, b.embedding)
+        for a, b in pairs
+        if a.embedding and b.embedding
+    ]
+    # Map mean cosine from [-1, 1] into [0, 1].
+    base: float = (sum(sims) / len(sims) + 1.0) / 2.0 if sims else 0.5
+
+    # ── Step 2: curated override adjustments ────────────────────────────────
+    ids = {it.id for it in items}
+    # Count items that have at least one confirmed pairing partner in the outfit.
+    boost = sum(
+        1 for it in items if set(it.pairs_well_with) & (ids - {it.id})
+    )
+    # Count items that have at least one confirmed clash partner in the outfit.
+    penalty = sum(
+        1 for it in items if set(it.avoid_pairing_with) & (ids - {it.id})
+    )
+
+    # ── Step 3: combine and clamp ────────────────────────────────────────────
+    return max(0.0, min(1.0, base + 0.10 * boost - 0.20 * penalty))

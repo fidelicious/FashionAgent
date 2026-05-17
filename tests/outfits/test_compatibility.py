@@ -22,7 +22,7 @@ import pytest
 from clawbot.outfits.compatibility import compute_compatibility
 from tests.outfits.conftest import make_item
 
-STRICT_XFAIL = False  # Flip to True after compute_compatibility is implemented.
+STRICT_XFAIL = True  # Flipped after compute_compatibility was implemented.
 
 
 def _override_embedding(item, vec):
@@ -48,10 +48,9 @@ class TestCompatibility:
         assert compute_compatibility([top, bot]) >= 0.5
 
 
-@pytest.mark.xfail(strict=STRICT_XFAIL, reason="compatibility body is a user contribution")
 class TestCompatibilityFormula:
-    """Invariants that require a real formula — fail today, will pass once you
-    implement compute_compatibility(). Flip STRICT_XFAIL = True after to enforce."""
+    """Invariants that require a real formula — enforced now that
+    compute_compatibility() is implemented."""
 
     def test_opposite_embeddings_lower_than_identical(self):
         v = np.ones(512, dtype=np.float32)
