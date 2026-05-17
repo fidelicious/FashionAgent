@@ -8,6 +8,7 @@ compose this module however it wants.
 """
 
 from clawbot.outfits.candidates import generate_candidates
+from clawbot.outfits.collage import CollageConfig, build_collage
 from clawbot.outfits.compatibility import compute_compatibility
 from clawbot.outfits.llm import OllamaConfig, pick_best_outfit
 from clawbot.outfits.llm_schema import LLMChoice, OutfitChoice, build_fallback_choice
@@ -25,6 +26,7 @@ from clawbot.outfits.types import (
 
 __all__ = [
     "WEIGHTS",
+    "CollageConfig",
     "LLMChoice",
     "Outfit",
     "OllamaConfig",
@@ -33,6 +35,7 @@ __all__ = [
     "ScoredOutfit",
     "ScoringContext",
     "WardrobeItem",
+    "build_collage",
     "build_fallback_choice",
     "compute_compatibility",
     "generate_candidates",
