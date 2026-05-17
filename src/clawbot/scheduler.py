@@ -1,16 +1,17 @@
 """
 APScheduler bootstrap.
 
-One ``AsyncIOScheduler`` lives inside the bot's event loop. After Step 13
-it registers three jobs:
+One ``AsyncIOScheduler`` lives inside the bot's event loop. After Step 14
+it registers five jobs:
 
-    inbox_sweep   : interval, ``schedule.inbox_sweep_seconds`` (default 60s)
-    disk_check    : cron,     ``schedule.disk_check``          (default "0 * * * *")
-    daily_outfit  : cron,     ``schedule.daily_outfit``        (default "0 7 * * *")
+    inbox_sweep     : interval, ``schedule.inbox_sweep_seconds`` (default 60s)
+    disk_check      : cron,     ``schedule.disk_check``          (default "0 * * * *")
+    daily_outfit    : cron,     ``schedule.daily_outfit``        (default "0 7 * * *")
+    nightly_backup  : cron,     ``schedule.nightly_backup``      (default "30 2 * * *")
+    db_vacuum       : cron,     ``schedule.db_vacuum``           (default "0 3 * * 0")
 
-Steps 14 will add ``nightly_backup`` and ``db_vacuum``. Each must keep the
-"injectable side-effects + skinny wrapper" shape so unit tests stay
-synchronous and offline.
+Each must keep the "injectable side-effects + skinny wrapper" shape so unit
+tests stay synchronous and offline.
 """
 
 from __future__ import annotations
@@ -27,6 +28,13 @@ from clawbot.discord.bot import BotContext
 from clawbot.inbox.disk_check import handle_disk_check
 from clawbot.inbox.notify import Notifier
 from clawbot.inbox.watcher import IngestFn, SweepReport, sweep
+from clawbot.maintenance import (
+    BackupResult,
+    VacuumResult,
+    create_backup,
+    prune_old_backups,
+    run_db_vacuum,
+)
 from clawbot.outfits.daily import DailyResult, run_daily_outfit
 from clawbot.outfits.llm import OllamaConfig
 
@@ -96,6 +104,55 @@ def build_scheduler(
         _daily_outfit,
         CronTrigger.from_crontab(ctx.config.schedule.daily_outfit),
         id="daily_outfit",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    async def _nightly_backup() -> BackupResult:
+        # `include` paths in clawbot.yaml are container-absolute. Pass them
+        # straight through; the backup helper handles missing paths gracefully.
+        include_paths = [Path(p) for p in ctx.config.backup.include]
+        backups_dir = Path(ctx.config.paths.backups_dir)
+        result = create_backup(
+            include=include_paths,
+            output_dir=backups_dir,
+            exclude_globs=list(ctx.config.backup.exclude_globs),
+        )
+        # Retention runs in the same tick so the disk stays bounded.
+        dropped = prune_old_backups(backups_dir, retain_days=ctx.config.backup.retain_days)
+        if dropped:
+            logger.info("nightly_backup: pruned %d old tarball(s)", len(dropped))
+        ctx.repo.audit.write(
+            "nightly_backup",
+            f"path={result.path.name} bytes={result.bytes} pruned={len(dropped)}",
+            actor="job:nightly_backup",
+        )
+        return result
+
+    sched.add_job(
+        _nightly_backup,
+        CronTrigger.from_crontab(ctx.config.schedule.nightly_backup),
+        id="nightly_backup",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    async def _db_vacuum() -> VacuumResult:
+        result = run_db_vacuum(ctx.repo.conn)
+        ctx.repo.audit.write(
+            "db_vacuum",
+            f"before={result.bytes_before} after={result.bytes_after} "
+            f"reclaimed={result.bytes_reclaimed}",
+            actor="job:db_vacuum",
+        )
+        return result
+
+    sched.add_job(
+        _db_vacuum,
+        CronTrigger.from_crontab(ctx.config.schedule.db_vacuum),
+        id="db_vacuum",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
