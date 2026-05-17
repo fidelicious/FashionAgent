@@ -16,7 +16,7 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/daily-push` (build Steps 1–13 complete):
+`feat/backup-vacuum` (build Steps 1–14 complete):
 
 - ✅ Sections **1–11** are complete and exercisable today.
 - ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
@@ -58,7 +58,11 @@ roughly mirror them but are not identical. As of the current branch
   candidates, asks `gemma3:1b` to pick a favourite, renders the
   collage, persists to `outfits` / `outfit_items`, and posts the
   image to Discord. Manual trigger via `run_job_now(sched, "daily_outfit")`.
-- ⏳ Sections **13–14** are still pending future build steps:
+- 🛠️ Build Step **14** (maintenance) — nightly tar.gz backup at 02:30
+  with 14-day retention pruning, and weekly SQLite `VACUUM` at 03:00
+  every Sunday. Both jobs write to `audit_log` so the operator can
+  confirm they ran via `SELECT * FROM audit_log WHERE kind LIKE '%backup%'`.
+- ⏳ Section **15** (docs wrap) is the final step:
   - 13. Backups and restores → **build Step 14**
   - 14. Maintenance → **build Step 14**
 - 🧰 Section **15** (Troubleshooting) grows in place.
@@ -1165,12 +1169,102 @@ the container at 06:55 and watch the 07:00 tick fire.
 
 ## 13. Backups and restores
 
-> ⏳ **Pending build Step 14** (backup script). Outline:
->
-> - Nightly job at 02:30 tarballs `db/` + `images/` into `backups/`.
-> - Retention is 14 days (configurable via `backup.retain_days` in `clawbot.yaml`).
-> - Restore is `tar -xzf backups/clawbot-YYYYMMDD.tar.gz -C /tmp/restore-test/`
->   then point a temporary container at the restored path to verify it opens.
+> ✅ **Works today** (build Step 14). Two automated jobs run inside the
+> clawbot container — no host-side cron needed.
+
+### What runs and when
+
+| Job | Cron | Action |
+|---|---|---|
+| `nightly_backup` | `30 2 * * *` | tar+gzip the paths in `backup.include` (default `/data/db` + `/data/images`) into `/data/backups/clawbot-YYYY-MM-DD.tar.gz`, then prune anything older than `backup.retain_days` (default 14). |
+| `db_vacuum`      | `0 3 * * 0`  | Run SQLite `VACUUM` to defragment `clawbot.db`. Reclaims space freed by `/forget_item` and outfit churn. |
+
+Each job writes one row to `audit_log` so the operator can confirm it ran.
+
+### How to verify the next morning
+
+```bash
+# Was the tarball created?
+ls -lht ~/FashionAgent/backups/ | head -5
+
+# Did the audit log capture it?
+sqlite3 ~/FashionAgent/db/clawbot.db \
+  "SELECT ts, kind, message FROM audit_log
+    WHERE kind IN ('nightly_backup', 'db_vacuum')
+    ORDER BY ts DESC LIMIT 5;"
+```
+
+You should see a `nightly_backup` row each day and a `db_vacuum` row every
+Sunday morning.
+
+### Restore from a backup
+
+Stop the container first so SQLite isn't being written to mid-restore:
+
+```bash
+docker compose -f docker/docker-compose.yml stop clawbot
+
+# Extract into a sibling directory and inspect it before swapping in.
+mkdir -p ~/FashionAgent/restore-test
+tar -xzf ~/FashionAgent/backups/clawbot-2026-05-17.tar.gz \
+  -C ~/FashionAgent/restore-test/
+
+# Sanity check: the restored DB should open.
+sqlite3 ~/FashionAgent/restore-test/db/clawbot.db \
+  "SELECT COUNT(*) FROM wardrobe_items;"
+```
+
+When you're satisfied:
+
+```bash
+# Move the live data aside (don't delete until you've confirmed the restore).
+mv ~/FashionAgent/db    ~/FashionAgent/db.broken
+mv ~/FashionAgent/images ~/FashionAgent/images.broken
+
+# Swap in the restored copy.
+mv ~/FashionAgent/restore-test/db     ~/FashionAgent/db
+mv ~/FashionAgent/restore-test/images ~/FashionAgent/images
+
+# Start back up.
+docker compose -f docker/docker-compose.yml start clawbot
+```
+
+If the bot comes up clean (`/health` returns green), remove the
+`*.broken` directories at your leisure.
+
+### Manually trigger a backup now
+
+Useful before risky migrations:
+
+```bash
+docker exec clawbot python -c "
+import asyncio
+from clawbot.scheduler import run_job_now
+# (Wire up scheduler from your running bot context — see app.py.)
+"
+```
+
+Cleaner CLI lands in Step 15. For now, the cleanest "right now" snapshot is
+to stop the container and tar the host paths directly:
+
+```bash
+docker compose -f docker/docker-compose.yml stop clawbot
+tar -czf ~/FashionAgent/backups/manual-$(date +%F).tar.gz \
+  -C ~/FashionAgent db images
+docker compose -f docker/docker-compose.yml start clawbot
+```
+
+### Troubleshooting
+
+- **No new tarball appearing** — check `docker compose logs -f clawbot |
+  grep backup`. A silent run usually means the cron didn't fire (typo in
+  `schedule.nightly_backup`). The audit log will show the last successful run.
+- **Tarball grew unexpectedly** — `images/raw/` is the usual culprit once
+  the wardrobe stabilises. Add `"**/raw/**"` to `backup.exclude_globs` in
+  `clawbot.yaml` and restart the container.
+- **`PRAGMA database_list` returns no file path in the vacuum log** —
+  you're running against `:memory:`. VACUUM still runs; the size readout
+  is just 0/0.
 
 ---
 
