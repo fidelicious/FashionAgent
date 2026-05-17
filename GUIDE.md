@@ -16,7 +16,7 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/email-parser` (build Steps 1–9 complete):
+`feat/outfit-scorer` (build Steps 1–10 complete):
 
 - ✅ Sections **1–11** are complete and exercisable today.
 - ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
@@ -35,8 +35,15 @@ roughly mirror them but are not identical. As of the current branch
   parser for **Quince**, **UNIQLO**, **H&M**: drop a `.eml` into
   `inbox/email/` and the watcher splits it into 1..N wardrobe rows,
   with or without inline product images.
+- 🛠️ Build Step **10** (outfit scorer) — pure-Python deterministic
+  scorer with 5 sub-formulas (style_match, season, occasion_match,
+  budget_alignment, duplicate_penalty) plus a `compute_compatibility()`
+  function blending Fashion-CLIP pair cosine similarity with the
+  curated `pairs_well_with` / `avoid_pairing_with` lists. No operator
+  surface yet — feeds into Step 13 (daily push). Hypothesis property
+  tests pin the total to the documented `[-25, 100]` range.
 - ⏳ Sections **12–14** are still pending future build steps:
-  - 12. Daily 7am outfit push → **build Step 13** (needs Steps 10–12)
+  - 12. Daily 7am outfit push → **build Step 13** (needs Steps 11–12)
   - 13. Backups and restores → **build Step 14**
   - 14. Maintenance → **build Step 14**
 - 🧰 Section **15** (Troubleshooting) grows in place.
