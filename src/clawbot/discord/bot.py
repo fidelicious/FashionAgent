@@ -41,16 +41,36 @@ class _HasSendMessage(Protocol):
         embed: Any = ...,
     ) -> None: ...
 
+    async def defer(
+        self, *, ephemeral: bool = ..., thinking: bool = ...
+    ) -> None: ...
+
+
+class _HasFollowupSend(Protocol):
+    async def send(
+        self,
+        content: str | None = ...,
+        *,
+        ephemeral: bool = ...,
+        embed: Any = ...,
+    ) -> None: ...
+
 
 class _HasUser(Protocol):
     id: int
 
 
 class InteractionLike(Protocol):
-    """Minimal Interaction surface used by our handlers."""
+    """Minimal Interaction surface used by our handlers.
+
+    ``followup`` is required because slow commands (e.g. /add_item) must
+    defer first and then reply via ``followup.send`` — after ``defer()``,
+    ``response.send_message()`` raises ``InteractionResponded``.
+    """
 
     user: _HasUser
     response: _HasSendMessage
+    followup: _HasFollowupSend
 
 
 # ─────────────────────────────────────────────────────────────────────────────

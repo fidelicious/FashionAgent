@@ -161,7 +161,7 @@ async def test_add_item_persists_row_and_replies(
     assert items[0].category == "tops"
     assert items[0].subcategory == "cardigan"
 
-    body = operator_interaction.response.sent[0]["content"]
+    body = operator_interaction.followup.sent[0]["content"]
     assert "cardigan" in body
     assert "/edit_item" in body  # tells the operator how to correct
 
@@ -217,6 +217,37 @@ async def test_add_item_audit_logged(
     rows = ctx.repo.audit.recent(limit=10)
     kinds = [r["kind"] for r in rows]
     assert "item_added" in kinds
+
+
+@pytest.mark.asyncio
+async def test_add_item_uses_followup_after_defer(
+    ctx: BotContext,
+    operator_interaction: FakeInteraction,
+    tmp_path: Path,
+    fake_ingest,
+) -> None:
+    # Regression for the production crash: _add_item defers (because the
+    # pipeline is slow), so handle_add_item MUST reply via followup.send,
+    # not response.send_message — the latter raises InteractionResponded.
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+
+    await operator_interaction.response.defer(ephemeral=True, thinking=True)
+
+    await handle_add_item(
+        ctx,
+        operator_interaction,
+        image_bytes=b"fake-jpeg-bytes",
+        file_suffix=".jpg",
+        name=None,
+        brand=None,
+        raw_dir=raw_dir,
+        ingest=fake_ingest,
+    )
+
+    assert len(operator_interaction.followup.sent) == 1
+    body = operator_interaction.followup.sent[0]["content"]
+    assert "cardigan" in body
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -123,7 +123,12 @@ async def handle_add_item(
         2. Run ``ingest(raw_path, source='upload', config=ctx.config)``.
         3. Build a WardrobeItem from the draft + operator hints.
         4. Insert; write the 512-d embedding into wardrobe_items_vec.
-        5. Audit-log; reply ephemerally with the new short id + summary.
+        5. Audit-log; reply ephemerally via ``followup.send``.
+
+    The reply goes through ``followup.send`` (not ``response.send_message``)
+    because the slash-command wrapper defers the interaction first — the
+    pipeline can take 10–30s and Discord expires unacknowledged interactions
+    after 3s. After ``defer()``, the initial response is already consumed.
     """
     raw_dir = raw_dir or (ctx.config.paths.images_dir / "raw")
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -154,7 +159,7 @@ async def handle_add_item(
 
     short = item_id[:8]
     summary = _format_add_reply(item, short_id=short)
-    await interaction.response.send_message(summary, ephemeral=True)
+    await interaction.followup.send(summary, ephemeral=True)
 
 
 def _format_add_reply(item: WardrobeItem, *, short_id: str) -> str:
