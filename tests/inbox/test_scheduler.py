@@ -52,13 +52,22 @@ def test_build_scheduler_registers_disk_check(
     assert isinstance(job.trigger, CronTrigger)
 
 
+def test_build_scheduler_registers_daily_outfit(
+    ctx: BotContext, notifier
+) -> None:
+    """Step 13 wires daily_outfit into the scheduler."""
+    sched = build_scheduler(ctx, notifier=notifier)
+    job = _job(sched, "daily_outfit")
+    assert job is not None
+    assert isinstance(job.trigger, CronTrigger)
+
+
 def test_build_scheduler_does_not_register_unfinished_jobs(
     ctx: BotContext, notifier
 ) -> None:
-    """db_vacuum and daily_outfit are Step 13+/14. Not in this branch."""
+    """db_vacuum is Step 14. Not in this branch."""
     sched = build_scheduler(ctx, notifier=notifier)
     assert _job(sched, "db_vacuum") is None
-    assert _job(sched, "daily_outfit") is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

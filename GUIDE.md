@@ -16,7 +16,7 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/outfit-collage` (build Steps 1–12 complete):
+`feat/daily-push` (build Steps 1–13 complete):
 
 - ✅ Sections **1–11** are complete and exercisable today.
 - ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
@@ -53,8 +53,12 @@ roughly mirror them but are not identical. As of the current branch
   (top or dress) in the top-left; renders labelled placeholders for
   items that don't yet have a thumbnail. Writes a 1024×1024 PNG.
   Feeds into Step 13.
-- ⏳ Sections **12–14** are still pending future build steps:
-  - 12. Daily 7am outfit push → **build Step 13** (all prereqs now landed)
+- 🛠️ Build Step **13** (daily push) — `clawbot.outfits.run_daily_outfit()`
+  + APScheduler cron `0 7 * * *`. Queries the wardrobe, scores
+  candidates, asks `gemma3:1b` to pick a favourite, renders the
+  collage, persists to `outfits` / `outfit_items`, and posts the
+  image to Discord. Manual trigger via `run_job_now(sched, "daily_outfit")`.
+- ⏳ Sections **13–14** are still pending future build steps:
   - 13. Backups and restores → **build Step 14**
   - 14. Maintenance → **build Step 14**
 - 🧰 Section **15** (Troubleshooting) grows in place.
@@ -1098,8 +1102,64 @@ and:
 
 ## 12. Verify the daily 7am outfit push
 
-> ⏳ **Pending build Step 13** (daily push job). Requires build Steps 10–12
-> (outfit scorer, LLM wrapper, collage) first.
+> ✅ **Works today** (build Step 13). The scheduler fires `daily_outfit`
+> on the cron in `clawbot.yaml` (default `0 7 * * *`).
+
+### What the job does
+
+1. Lists every active wardrobe item.
+2. Generates plausible outfit candidates (filtered by current season),
+   scores each, keeps the top 3.
+3. Asks `gemma3:1b` over Ollama to pick one with a one-sentence reason.
+   Retries on bad JSON; falls back to the highest-scored if the LLM is
+   unreachable.
+4. Renders a 1024×1024 collage to `~/FashionAgent/images/outfits/`.
+5. Writes one row to `outfits` and one row per item to `outfit_items`.
+6. Posts the collage + the LLM reason to the operator Discord channel.
+
+### How to verify after the next 7am tick
+
+```bash
+# Today's outfit row, if any:
+sqlite3 ~/FashionAgent/db/clawbot.db "SELECT id, score, llm_explanation FROM outfits ORDER BY generated_at DESC LIMIT 1;"
+
+# And the collage that was sent:
+ls -lht ~/FashionAgent/images/outfits/ | head -5
+```
+
+You should also see one Discord message in the operator channel with the
+collage attached. If the LLM was unreachable, the message will be prefixed
+`[LLM fallback]` — that's an operator-visible signal, not a failure.
+
+### Trigger it manually for testing
+
+Open a Python shell in the running container and call:
+
+```bash
+docker exec -it clawbot python -c "
+import asyncio
+from clawbot.outfits.daily import run_daily_outfit
+# (Wire up repo + notifier from your bot context.)
+"
+```
+
+The cleaner path lands in **Step 14** (CLI entry point). For now, restart
+the container at 06:55 and watch the 07:00 tick fire.
+
+### Troubleshooting
+
+- **No Discord message at 7am** — check `docker compose logs -f clawbot |
+  grep daily_outfit`. The job logs each stage; a silent run means the cron
+  trigger isn't firing (usually a typo in `clawbot.yaml`'s `daily_outfit:
+  "0 7 * * *"`).
+- **Message arrived without an image** — collage write failed. Check disk
+  space (`df -h ~/FashionAgent`) and the warning log line.
+- **Operator wardrobe is empty** — the job posts a clear "wardrobe is
+  empty" message instead of crashing. Run `/add_item` a few times and
+  wait for the next tick.
+- **Outfit keeps recommending the same items** — `duplicate_penalty` is
+  capped at the last ~14 outfits. Wear count and other variety levers
+  land in V2.
 
 ---
 
