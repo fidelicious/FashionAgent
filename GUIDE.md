@@ -16,7 +16,7 @@ is included, every common failure has a Troubleshooting note.
 This is a **living document** that grows as the V1 build progresses. The
 implementation has 15 build steps; the GUIDE has 15 operator sections that
 roughly mirror them but are not identical. As of the current branch
-`feat/outfit-llm` (build Steps 1–11 complete):
+`feat/outfit-collage` (build Steps 1–12 complete):
 
 - ✅ Sections **1–11** are complete and exercisable today.
 - ✅ Section **7.5** (validate the image pipeline on the NUC) — all 3
@@ -48,8 +48,13 @@ roughly mirror them but are not identical. As of the current branch
   reply via Pydantic, retries on bad JSON / 5xx / timeout up to
   `llm_max_retries`, and falls back to the top-scored candidate when
   retries exhaust. No operator surface yet — feeds into Step 13.
+- 🛠️ Build Step **12** (outfit collage) — Pillow-based 2×2 grid at
+  `clawbot.outfits.build_collage()`. Default layout puts the hero
+  (top or dress) in the top-left; renders labelled placeholders for
+  items that don't yet have a thumbnail. Writes a 1024×1024 PNG.
+  Feeds into Step 13.
 - ⏳ Sections **12–14** are still pending future build steps:
-  - 12. Daily 7am outfit push → **build Step 13** (needs Step 12)
+  - 12. Daily 7am outfit push → **build Step 13** (all prereqs now landed)
   - 13. Backups and restores → **build Step 14**
   - 14. Maintenance → **build Step 14**
 - 🧰 Section **15** (Troubleshooting) grows in place.
