@@ -1483,13 +1483,195 @@ docker compose -f docker/docker-compose.yml restart clawbot
 The old token can be revoked from the Discord Developer Portal → Bot →
 Reset Token.
 
----
+### Keeping it running
+
+Both containers ship with `restart: unless-stopped`
+([docker-compose.yml:18,48](docker/docker-compose.yml#L18)). Here's the
+full behaviour matrix:
+
+| Event | Behaviour | Action needed |
+|---|---|---|
+| Bot crashes (Python exception, OOM, etc.) | Docker restarts the container immediately. | None |
+| Ollama crashes | Docker restarts it. | None |
+| NUC reboots (planned `sudo reboot`) | Docker daemon starts on boot **if you enabled it** — see below. | One-time setup |
+| NUC loses power, comes back | Same as reboot — depends on Docker auto-start. | One-time setup |
+| You ran `docker compose down` manually | Containers stay down until you bring them back up. | Manual `up -d` |
+| You ran `docker compose stop clawbot` | Same — stays stopped until you `start` it. | Manual `start` |
+
+`unless-stopped` is the right policy: it restarts on crashes but respects
+your explicit `stop` (so you don't fight Docker when debugging).
+
+#### One-time setup: Docker on boot
+
+You almost certainly want this. Run once on the NUC:
+
+```bash
+sudo systemctl enable docker
+sudo systemctl is-enabled docker   # expect: enabled
+```
+
+After this, a power cycle → Docker daemon starts → both containers come
+back automatically.
+
+Test it without rebooting:
+
+```bash
+sudo systemctl restart docker
+sleep 10
+docker compose -f ~/FashionAgent/docker/docker-compose.yml ps
+# both containers should show "Up"
+```
+
+#### How to confirm everything's really running
+
+Three checks together give you full confidence:
+
+```bash
+# 1. Containers are up:
+docker compose -f ~/FashionAgent/docker/docker-compose.yml ps
+
+# 2. Bot logged the real startup banners (not the foundation-pass stub):
+docker compose -f ~/FashionAgent/docker/docker-compose.yml logs clawbot --tail 50 \
+  | grep -E 'Starting Discord|Synced|Scheduler started'
+
+# 3. Discord shows the bot online with a green dot.
+```
+
+If all three pass, you're good.
+
+#### Quick remote health check from your Mac
+
+```bash
+ssh fidelicious@10.0.0.85 \
+  "docker compose -f ~/FashionAgent/docker/docker-compose.yml ps --format 'table {{.Service}}\t{{.Status}}'"
+```
+
+Or just type `/health` in Discord — fastest way to confirm DB + Ollama + bot
+are all happy.
+
+#### Big red button: full restart
+
+If something's wrong and you don't want to investigate yet, this resets
+everything cleanly **without** losing data:
+
+```bash
+cd ~/FashionAgent
+docker compose -f docker/docker-compose.yml restart
+sleep 10
+docker compose -f docker/docker-compose.yml logs clawbot --tail 50
+```
+
+Your DB, images, inbox, and backups live on the host filesystem (bind
+mounts at lines 59-66 of the compose file) — restarting containers never
+touches them.
 
 ---
 
 ## 15. Troubleshooting cookbook
 
 This section grows over time. Check it before opening a fresh investigation.
+
+For named failure modes with full procedures, see
+**[docs/runbooks/](docs/runbooks/)** — one file per failure mode (LLM
+unavailable, disk full, database locked, etc.) following a consistent
+*Symptom → Diagnose → Fix → Prevent* format.
+
+### "Something's wrong but I don't know what" — diagnostic flowchart
+
+Three categories cover almost everything. Pick the one that matches your
+symptom, run the listed checks, then jump to the specific section the
+output points you to.
+
+| What you see | Where to start |
+|---|---|
+| Bot shows offline in Discord (grey dot) | **Step 1** below |
+| Daily 7am message didn't arrive | **Step 2** below |
+| Both — or "it's broken in some other way" | **Step 3** below |
+
+#### Step 1: is the container running?
+
+```bash
+docker compose -f ~/FashionAgent/docker/docker-compose.yml ps
+```
+
+- **Status `Up`** → container is fine; problem is Discord-side. See
+  [docs/runbooks/discord-token-expired.md](docs/runbooks/discord-token-expired.md).
+- **Status `Restarting`** → it's in a crash loop. Go to Step 3.
+- **Status `Exited` or missing** → bring it back:
+  `docker compose -f ~/FashionAgent/docker/docker-compose.yml up -d`.
+
+#### Step 2: did the cron actually fire?
+
+```bash
+sqlite3 ~/FashionAgent/db/clawbot.db \
+  "SELECT ts, kind, message FROM audit_log
+   WHERE kind LIKE '%outfit%' OR kind LIKE '%backup%' OR kind LIKE '%vacuum%'
+   ORDER BY ts DESC LIMIT 10;"
+```
+
+If you don't see a row from this morning, follow
+[docs/runbooks/daily-outfit-failed.md](docs/runbooks/daily-outfit-failed.md).
+
+#### Step 3: read the logs
+
+```bash
+# Last 200 lines, errors and warnings only:
+docker compose -f ~/FashionAgent/docker/docker-compose.yml logs clawbot --tail 200 \
+  | grep -iE 'error|warn|exception|traceback'
+
+# If that's quiet but the container is restarting, get everything unfiltered:
+docker compose -f ~/FashionAgent/docker/docker-compose.yml logs clawbot --tail 200
+```
+
+The **first** traceback or `ERROR` line is almost always the real cause —
+later lines are usually downstream noise. Match it against the runbooks:
+
+| Log fragment | Runbook |
+|---|---|
+| `LoginFailure: Improper token` | [discord-token-expired.md](docs/runbooks/discord-token-expired.md) |
+| `database is locked` | [database-locked.md](docs/runbooks/database-locked.md) |
+| `[Errno 28] No space left on device` | [disk-full.md](docs/runbooks/disk-full.md) |
+| `httpx.ConnectError` / `ollama: connection refused` | [llm-unavailable.md](docs/runbooks/llm-unavailable.md) |
+| Files piling up in `inbox/` but no sweep activity | [inbox-stuck.md](docs/runbooks/inbox-stuck.md) |
+| `Clawbot starting (foundation-pass stub)` | The image is stale. You're on an old branch, or never rebuilt — see "I rebuilt but it's still the old code" below. |
+
+### "I rebuilt but it's still the old code"
+
+The Docker image bakes in `src/` at build time
+([clawbot.Dockerfile](docker/clawbot.Dockerfile)). Pulling `main` on the
+host doesn't update the running container until you also rebuild.
+
+1. Confirm you're actually on `main`:
+   ```bash
+   cd ~/FashionAgent
+   git status -sb     # expect: ## main...origin/main
+   git log --oneline -3
+   ```
+   If `HEAD ->` points at any `feat/...` branch, switch:
+   `git checkout main && git pull --ff-only`.
+
+2. Force a no-cache rebuild — the layer cache may otherwise serve old
+   `COPY src/` even after a branch change:
+   ```bash
+   docker compose -f ~/FashionAgent/docker/docker-compose.yml down
+   docker compose -f ~/FashionAgent/docker/docker-compose.yml build --no-cache clawbot
+   docker compose -f ~/FashionAgent/docker/docker-compose.yml up -d
+   docker compose -f ~/FashionAgent/docker/docker-compose.yml logs -f clawbot --tail 100
+   ```
+
+3. Expected boot lines (in order):
+   ```
+   INFO clawbot.main: Starting Discord bot.
+   INFO clawbot.main: Synced slash commands to guild <ID>
+   INFO clawbot.main: Scheduler started: inbox_sweep every 60s, disk_check at '0 * * * *'
+   ```
+   If you instead see `Clawbot starting (foundation-pass stub)`, the
+   image is still serving Step 1-4 code — re-check step 1.
+
+### "I added `discord:` to clawbot.yaml but pydantic says `extra_forbidden`"
+
+The `discord` block requires Step 6+ schema. If pydantic rejects it, your
+running image predates Step 6 — apply the rebuild recipe above.
 
 ### "`pip install` says `externally-managed-environment`"
 
