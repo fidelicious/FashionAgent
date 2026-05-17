@@ -9,6 +9,8 @@ compose this module however it wants.
 
 from clawbot.outfits.candidates import generate_candidates
 from clawbot.outfits.compatibility import compute_compatibility
+from clawbot.outfits.llm import OllamaConfig, pick_best_outfit
+from clawbot.outfits.llm_schema import LLMChoice, OutfitChoice, build_fallback_choice
 from clawbot.outfits.score import (
     WEIGHTS,
     ScoreBreakdown,
@@ -23,12 +25,17 @@ from clawbot.outfits.types import (
 
 __all__ = [
     "WEIGHTS",
+    "LLMChoice",
     "Outfit",
+    "OllamaConfig",
+    "OutfitChoice",
     "ScoreBreakdown",
     "ScoredOutfit",
     "ScoringContext",
     "WardrobeItem",
+    "build_fallback_choice",
     "compute_compatibility",
     "generate_candidates",
+    "pick_best_outfit",
     "score_outfit",
 ]

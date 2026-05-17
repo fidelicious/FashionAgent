@@ -74,6 +74,9 @@ dev = [
     "numpy>=1.26",
     "Pillow>=10.3",
     "colorthief>=0.2.1",
+    # Used by tests/outfits/test_llm.py to mock the Ollama HTTP layer via
+    # httpx.MockTransport. Production runtime gets httpx from the [llm] extra.
+    "httpx>=0.27,<1",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
