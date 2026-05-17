@@ -1,32 +1,60 @@
-# Clawbot
+# FashionAgent
 
 Local-only personal fashion assistant. Runs on a home NUC. Talks to you on Discord.
 Open source end-to-end, no paid services.
 
 > **Smart stylist, not autonomous shopping bot.**
 
-## What it does (V1)
+## What it does (V1, shipping today)
 
-- Tracks your wardrobe with rich per-item metadata (cardigan vs sweater, fabric, fit, formality, cost-per-wear).
-- Stores a personal profile (skin undertone, body shape, sizing, lifestyle, sensitivities).
-- Ingests new items three ways: Discord upload, screenshots dropped into a folder, forwarded retailer emails.
-- Suggests outfits on demand and pushes a daily 7am pick to Discord.
-- All data stays on your local network. No cloud, no telemetry.
+- **Wardrobe tracking** — rich per-item metadata (cardigan vs. sweater, fabric, fit, formality, cost-per-wear), with soft-delete and edit history.
+- **Style profile** — skin undertone, body shape, sizing, fit preferences, sensitivities, monthly budget. One row, your truth.
+- **Three ingestion surfaces** — Discord `/add_item`, screenshot drop folder, forwarded retailer emails (Quince, UNIQLO, H&M).
+- **Image pipeline** — rembg cutout → Fashion-CLIP embedding → zero-shot attribute classification → Tesseract OCR for brand/price.
+- **Daily 7am outfit push** — deterministic scorer (style + compatibility + season + occasion + budget − duplicate penalty) ranks plausible outfits, Gemma 3 1B picks one with a one-sentence reason, Pillow renders a 2×2 collage, Discord receives the image.
+- **Backups** — nightly tar.gz with retention pruning, weekly SQLite VACUUM. All scheduled in-process.
+- **Hardened against the obvious failures** — LLM unreachable, Discord token expired, malformed email, missing images, FK violations: everything degrades to a logged warning, never a crash.
+
+All data stays on your local network. No cloud, no telemetry, no third-party API calls.
 
 ## What's deferred to V2
 
-Retailer scraping, web UI, learning from feedback, weather/calendar hooks, wardrobe gap analysis.
+Retailer scraping (Playwright), web UI (Open WebUI), feedback learning loop, weather/calendar hooks, wardrobe gap analysis, style clustering.
 
 ## Where to start
 
-- **Operators (you):** read [GUIDE.md](GUIDE.md) — step-by-step setup written for someone who has never used Docker.
-- **Developers:** read [docs/architecture.md](docs/architecture.md) (coming soon) and the [final plan](.claude/plans/task-help-me-finalize-abundant-sundae.md).
-- **Original blueprint:** see [fashionClaw.md](fashionClaw.md) for the design rationale.
+- **Operators (running it):** read **[GUIDE.md](GUIDE.md)** — step-by-step setup written for someone who has never used Docker. Start with the "Features and commands reference" section if you just want to know what the bot can do.
+- **Developers (extending it):** the [build plan](.claude/plans/task-help-me-finalize-abundant-sundae.md) describes the 15-step incremental build that produced this codebase. Per-feature design docs are inline in each module's docstring (`src/clawbot/outfits/*.py` is the densest layer).
+- **Failure modes:** see [docs/runbooks/](docs/runbooks/) for what to do when something specific breaks.
+- **Original blueprint:** [fashionClaw.md](fashionClaw.md) holds the design rationale.
 
 ## Hardware target
 
-- Intel NUC, x86_64, 8 GB RAM, Debian 13.
-- The same Docker stack will run on any modest Linux box; performance is sized to the worst case.
+- Intel NUC (or any x86_64 PC), 8 GB RAM, Debian 13.
+- Memory budget: ~6 GB used / 8 GB total at steady state (Ollama + Gemma 3 1B Q4 + nomic-embed + Python). Image jobs peak ~1.5 GB during ingestion.
+- The Docker stack runs on any modest Linux box; performance is sized to this worst case.
+
+## Quick architecture
+
+```
+                    ┌──────────────────────────────────┐
+You (Discord)  ──►  │              clawbot              │
+                    │  Discord bot │ FastAPI healthz    │
+                    │  APScheduler │ Image worker       │
+                    │              │ Daily-outfit job   │
+inbox/screenshots/  │       ▲                           │
+inbox/email/    ──► │       │ HTTP                      │
+                    │   ┌───┴────────┐                  │
+                    │   │   Ollama   │ Gemma 3 1B       │
+                    │   │            │ nomic-embed-text │
+                    │   └────────────┘                  │
+                    │                                   │
+                    │   SQLite + sqlite-vec             │
+                    │   ~/FashionAgent/db/clawbot.db    │
+                    └──────────────────────────────────┘
+```
+
+LAN-only. No public exposure.
 
 ## License
 

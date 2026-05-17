@@ -110,6 +110,7 @@ If you're new to this NUC and haven't done any setup yet, start at Section 1.
 
 ## Table of contents
 
+- [Features and commands reference](#features-and-commands-reference) — start here if you just want to know what the bot can do
 1. [Prerequisites and hardware check](#1-prerequisites-and-hardware-check)
 2. [Install Docker and Docker Compose on Debian 13](#2-install-docker-and-docker-compose-on-debian-13)
 3. [Clone the repo and create the directory tree](#3-clone-the-repo-and-create-the-directory-tree)
@@ -126,6 +127,111 @@ If you're new to this NUC and haven't done any setup yet, start at Section 1.
 13. [Backups and restores](#13-backups-and-restores)
 14. [Maintenance](#14-maintenance)
 15. [Troubleshooting](#15-troubleshooting-cookbook)
+
+---
+
+## Features and commands reference
+
+Everything FashionAgent does in V1, grouped by how you interact with it.
+Each entry has a one-line summary plus a pointer into the GUIDE for the
+full setup or verification recipe.
+
+### Slash commands (Discord)
+
+All commands are gated to your `DISCORD_USER_ID` — nobody else in the
+server can invoke them.
+
+| Command | What it does | Notes |
+|---|---|---|
+| `/health` | Show bot health: DB connectivity, Ollama reachability, last successful job timestamps. | First thing to run when something feels off. See [Section 7](#7-start-the-clawbot-container). |
+| `/profile show` | Print your full style profile (skin undertone, body shape, sizing, preferences, sensitivities…). | One row only — there's just one operator. |
+| `/profile set <field> <value>` | Update a single profile field. Field names match the DB columns; `comfort_vs_style 7` etc. | Bulk-edit by editing `config/profile.bootstrap.yaml` and running the bootstrap script. See [Section 8](#8-bootstrap-your-profile). |
+| `/wardrobe [category]` | Paginated list of active items. Filter by category (`tops`, `bottoms`, `dresses`, `outerwear`, `footwear`, `accessories`). | Soft-deleted items are hidden — use `include_deleted=true` in `sqlite3` if you need to recover one. |
+| `/add_item <photo>` | Drop a photo in Discord; the bot runs it through rembg → Fashion-CLIP → colorthief, suggests category/colour/etc., asks you to confirm. | See [Section 9](#9-add-your-first-wardrobe-item) for the modal workflow. |
+| `/edit_item <short_id> <field> <value>` | Edit any single field on an existing item. Use the first 8 chars of the uuid that `/wardrobe` shows. | All `wardrobe_items` columns are addressable. |
+| `/forget_item <short_id>` | Soft-delete (sets `deleted_at`). The item still exists in the DB but won't appear in `/wardrobe` or outfits. | Restore by setting `deleted_at = NULL` in SQL. |
+
+> **Planned but not yet shipped in V1:** `/outfit [occasion]` and
+> `/backup_now`. The daily push (07:00 cron) and nightly backup (02:30
+> cron) cover the same ground automatically — manual command versions
+> are a V1.1 polish item.
+
+### Automatic background jobs (in-process scheduler)
+
+All of these run inside the clawbot container's APScheduler. No host-side
+cron entries needed.
+
+| Job | Schedule | What it does | Verify it ran |
+|---|---|---|---|
+| `inbox_sweep` | every 60s | Picks up new files in `inbox/screenshots/` and `inbox/email/`, runs the image pipeline or email parser, posts a draft to Discord. | `ls ~/FashionAgent/inbox/_processed/` |
+| `disk_check` | hourly | Warns on Discord when disk usage crosses `health.disk_warn_pct` (default 85%). | Watch the operator channel after dropping a big file. |
+| `daily_outfit` | `0 7 * * *` | Generates today's outfit, asks the LLM to pick from the top 3, renders a collage, posts it to Discord. | `SELECT * FROM outfits ORDER BY generated_at DESC LIMIT 1;` See [Section 12](#12-verify-the-daily-7am-outfit-push). |
+| `nightly_backup` | `30 2 * * *` | tar+gzip `db/` + `images/` to `backups/clawbot-YYYY-MM-DD.tar.gz`, prune older than `backup.retain_days`. | `ls -lht ~/FashionAgent/backups/` See [Section 13](#13-backups-and-restores). |
+| `db_vacuum` | `0 3 * * 0` | Sunday 03:00 SQLite VACUUM to reclaim space freed by deletes. | `SELECT * FROM audit_log WHERE kind='db_vacuum' ORDER BY ts DESC LIMIT 1;` |
+
+### Ingestion surfaces
+
+Three ways to add items to your wardrobe, in increasing order of automation:
+
+| Surface | How to use | Where it lands |
+|---|---|---|
+| **Discord upload** | `/add_item` with a photo attachment. | Image pipeline → Discord confirmation modal → `wardrobe_items` row. |
+| **Inbox screenshots** | `rsync`, `scp`, or AirDrop a JPG/PNG/WEBP into `~/FashionAgent/inbox/screenshots/` on the NUC. | Within 60s the watcher picks it up, runs OCR for brand/price, posts a draft to Discord, moves the file to `_processed/`. See [Section 10](#10-set-up-auto-ingest-from-your-phone). |
+| **Forwarded email** | Forward a retailer order confirmation (Quince, UNIQLO, H&M) to your mail-handling script that drops the `.eml` into `~/FashionAgent/inbox/email/`. | Email parser splits into 1..N wardrobe rows (one per line item), posts each to Discord with brand + price + item name pre-filled. See [Section 11](#11-set-up-email-forwarding-for-retailer-mails). |
+
+### Outfit recommendation engine
+
+How the daily push and any future `/outfit` command work, from the inside:
+
+1. **Candidate generation** — bucket every active item by role, filter by season, enumerate plausible combinations (top × bottom × footwear × optional outer, or dress × footwear), cap at 50.
+2. **Deterministic scoring** — each candidate gets a score in `[-25, 100]`:
+   - `style_match` (35) — colours match your favourites, avoid your dislikes
+   - `compatibility` (25) — Fashion-CLIP cosine similarity + curated `pairs_well_with`/`avoid_pairing_with` overrides
+   - `season` (15) — items tagged with the current season
+   - `occasion_match` (15) — formality distance from the requested occasion
+   - `budget_alignment` (10) — outfit total vs your `monthly_clothing_budget_usd`
+   - `duplicate_penalty` (−25) — items you wore in the last ~14 outfits
+3. **LLM tiebreaker** — top 3 candidates → `gemma3:1b` returns `{pick, reason}`. Retries on bad JSON; falls back to top-by-score if the LLM is unreachable.
+4. **Collage** — 2×2 grid PNG via Pillow, hero piece in top-left.
+5. **Persist + post** — write to `outfits` + `outfit_items`, send the collage + reason to Discord.
+
+All five scoring weights live in `config/clawbot.yaml` under `scoring:` —
+tune to taste without code changes.
+
+### Data and configuration on disk
+
+| Path (on the NUC) | What lives there |
+|---|---|
+| `~/FashionAgent/db/clawbot.db` | SQLite + sqlite-vec. Single source of truth. |
+| `~/FashionAgent/config/clawbot.yaml` | All tunable knobs — model choice, schedule, scoring weights, retention. |
+| `~/FashionAgent/secrets/.env` | `DISCORD_TOKEN`, `DISCORD_USER_ID`, `DISCORD_GUILD_ID`, `DISCORD_CHANNEL_ID`. **chmod 600.** |
+| `~/FashionAgent/images/raw/` | Original uploads. |
+| `~/FashionAgent/images/cutouts/` | Background-removed PNGs from rembg. |
+| `~/FashionAgent/images/final/` | 512px thumbnails used in collages and `/wardrobe`. |
+| `~/FashionAgent/images/outfits/` | Generated collage PNGs, one per `outfits` row. |
+| `~/FashionAgent/inbox/{screenshots,email}/` | Drop new files here; watcher picks them up within 60s. |
+| `~/FashionAgent/backups/` | Nightly tarballs. |
+| `~/FashionAgent/logs/` | Structlog JSON, rotated daily. |
+
+### Manual triggers (operator escape hatches)
+
+Until `/outfit` and `/backup_now` ship as slash commands, you can force a
+job from the host:
+
+```bash
+# Run today's outfit job immediately:
+docker exec -it clawbot python -c "
+import asyncio
+from clawbot.scheduler import run_job_now
+# (Inject scheduler from your bot's lifespan — see src/clawbot/main.py.)
+"
+
+# Snapshot the data trees right now (stops the container briefly):
+docker compose -f docker/docker-compose.yml stop clawbot
+tar -czf ~/FashionAgent/backups/manual-$(date +%F).tar.gz \
+  -C ~/FashionAgent db images
+docker compose -f docker/docker-compose.yml start clawbot
+```
 
 ---
 
@@ -1270,15 +1376,114 @@ docker compose -f docker/docker-compose.yml start clawbot
 
 ## 14. Maintenance
 
-> ⏳ **Pending build Step 14**. Outline:
->
-> - Update LLM: `docker exec clawbot-ollama ollama pull gemma3:1b`.
-> - Update Python deps: edit `pyproject.toml`, then
->   `docker compose build --no-cache clawbot`.
-> - Inspect DB: `sqlite3 ~/FashionAgent/db/clawbot.db` then `.tables`, `.schema`,
->   `SELECT * FROM user_profile;` etc.
-> - Free disk: `docker system prune -a` (removes unused images), then
->   inspect `~/FashionAgent/images/raw/` for items that already have cutouts.
+> ✅ **Works today** (build Step 14 shipped the cron jobs; the recipes
+> below cover everything you'll touch by hand).
+
+### Update the LLM
+
+Pulling a newer or larger Gemma keeps the daily outfit reasons fresh.
+
+```bash
+# Pull a new model:
+docker exec -it clawbot-ollama ollama pull gemma3:1b
+
+# Or experiment with a bigger one (RAM permitting — 3B is borderline on 8 GB):
+docker exec -it clawbot-ollama ollama pull qwen2.5:3b
+
+# Switch which model the daily push uses:
+$EDITOR ~/FashionAgent/config/clawbot.yaml
+# … change models.llm: "qwen2.5:3b" …
+docker compose -f docker/docker-compose.yml restart clawbot
+
+# Verify the change took:
+docker exec clawbot grep '^  llm:' /data/config/clawbot.yaml
+```
+
+If the new model is too slow, switch back the same way — your wardrobe and
+outfit history are untouched.
+
+### Update Python dependencies
+
+```bash
+cd ~/FashionAgent
+$EDITOR pyproject.toml   # bump versions in [project.dependencies]
+docker compose -f docker/docker-compose.yml build --no-cache clawbot
+docker compose -f docker/docker-compose.yml up -d clawbot
+docker compose -f docker/docker-compose.yml logs -f clawbot | head -50
+```
+
+Run the test suite locally before rebuilding to catch breakage early:
+
+```bash
+source .venv/bin/activate
+pip install -e ".[dev,vision,discord,scheduler,email,llm,api]"
+pytest
+```
+
+### Inspect the database
+
+`sqlite3` is the readonly Swiss army knife:
+
+```bash
+sqlite3 ~/FashionAgent/db/clawbot.db
+
+# Useful queries once you're in the shell:
+.tables
+.schema wardrobe_items
+SELECT COUNT(*) FROM wardrobe_items WHERE deleted_at IS NULL;
+SELECT id, score, llm_explanation, generated_at FROM outfits ORDER BY generated_at DESC LIMIT 10;
+SELECT ts, kind, message FROM audit_log ORDER BY ts DESC LIMIT 20;
+.quit
+```
+
+Use `\` instead of `;` to break long queries across lines.
+
+### Free disk space
+
+```bash
+# 1. Container/image cruft:
+docker system prune -a
+
+# 2. Old originals — once cutouts are stable you don't strictly need raw/:
+du -sh ~/FashionAgent/images/*
+# If raw/ dominates, set backup.exclude_globs to skip it in nightly tarballs
+# (see Section 13), then archive or delete the directory's contents.
+
+# 3. Old backups (the prune job handles this automatically, but you can
+#    nuke older snapshots safely):
+ls -lht ~/FashionAgent/backups/ | tail -10
+```
+
+The `nightly_backup` job already prunes anything older than
+`backup.retain_days`. The button to push is in `clawbot.yaml`, not at the
+command line.
+
+### Confirm the scheduled jobs ran
+
+```bash
+sqlite3 ~/FashionAgent/db/clawbot.db \
+  "SELECT ts, kind FROM audit_log
+    WHERE kind IN ('nightly_backup', 'db_vacuum', 'daily_outfit_shipped')
+    ORDER BY ts DESC LIMIT 10;"
+```
+
+You should see one `nightly_backup` row each day, one `db_vacuum` each
+Sunday, and one `daily_outfit_shipped` each morning after the 07:00 tick.
+
+### Rotate Discord credentials
+
+If your token leaks or you want to migrate to a new bot:
+
+```bash
+$EDITOR ~/FashionAgent/secrets/.env
+# … update DISCORD_TOKEN= … (and DISCORD_GUILD_ID if the new bot is in a different server)
+docker compose -f docker/docker-compose.yml restart clawbot
+```
+
+The old token can be revoked from the Discord Developer Portal → Bot →
+Reset Token.
+
+---
 
 ---
 
