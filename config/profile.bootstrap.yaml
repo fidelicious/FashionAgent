@@ -1,0 +1,143 @@
+# Profile bootstrap — copy to config/profile.bootstrap.yaml on the NUC, edit,
+# then run:  docker exec clawbot python -m clawbot.scripts.bootstrap_profile
+#
+# Anything you skip here you can fill in later via Discord '/profile set'.
+# Top-level keys (physical / sizing / style / ...) are visual groupings only;
+# they're flattened at load time. The actual profile fields are the inner keys.
+# See clawbot/profile.py::PROFILE_FIELDS for the full list.
+
+physical:
+  # name: "Your name"
+  age_range: "30s"             # freeform, e.g. "20s" / "30s" / "40s"
+  gender_expression: "feminine"
+  height_cm: 162.5
+  weight_kg_optional: 54       # optional — leave commented to skip
+  body_shape: "hourglass"        # rectangle / hourglass / pear / apple / inverted-triangle / other
+  skin_tone: "light"             # fair / light / medium / olive / tan / deep
+  skin_undertone: "neutral"         # warm / cool / neutral
+  hair_color: "blonde"
+  hair_length: "long"
+  hair_style_notes: "natural texture, occasional waves"
+  eye_color: "blue"
+  glasses: "none"          # none / always / occasional
+
+sizing:
+  top_size: "S"
+  bottom_size: "4"
+  dress_size: "4"
+  shoe_size_us: 7
+  inseam_cm: 68
+  rise_pref: "mid"               # low / mid / high — high also acceptable
+  bra_size: "32D"
+  fit_pref_json:
+    - "fitted-top-relaxed-bottom"
+    - "waist-definition"
+    - "straight-leg"
+    - "full-length"
+    - "soft-drape"
+    - "tops-tucked"
+
+style:
+  favorite_colors_json:          # comma-separated string also works
+    - "black"             # primary
+    - "charcoal"          # primary
+    - "taupe"             # high
+    - "beige"             # high
+    - "navy"              # high
+    - "ivory"             # high
+    - "white"             # medium
+    - "emerald"           # accent
+    - "forest-green"      # accent
+    - "olive"             # accent
+    - "burgundy"          # prior profile
+  disliked_colors_json:
+    - "neon"
+    - "bright-primary-colors"
+    - "high-saturation"
+    - "loud-prints"
+    - "overly-warm-browns"
+    - "pastels"
+  favorite_brands_json:
+    - "UNIQLO"
+    - "Quince"
+    - "H&M"
+    - "GU"
+    - "Levi’s"
+    - "Banana Republic"
+    - "J.Crew"
+    - "Everlane"
+  disliked_brands_json: []
+  jewelry_metal: "silver"          # gold / silver / rose / mixed
+  comfort_vs_style: 6            # both comfort and style are high; balanced with polished lean
+
+sensitivities:
+  fabric_avoid_json:
+    - "itchy-wool"
+    - "stiff-synthetics"
+    - "heavy-wool-suiting"
+    - "overly-structured-fabrics"
+    - "high-wrinkle-linen"
+    - "thick-fleece"
+  dye_allergies_json: []
+
+lifestyle:
+  city: "Pittsburg, CA"
+  climate_notes: "East Bay, CA — variable microclimate. Cool mornings and evenings, warm midday. Office AC runs mildly cool. Layering required year-round. Outdoor drying available. Travel-compatible wardrobe needed."
+  workplace_dress_code: "Casual — sneakers and jeans accepted. Smart-casual accepted and preferred. Polished minimalism. Not corporate. Office layer required daily."
+  commute_mode: "car"        # walk / bike / car / transit / mixed
+  activity_schedule_json:
+    office_days: "5/week"
+    commute: "car"
+    weekends: "casual"
+    social_activity: "low"
+    walking: "moderate"
+    train_travel: "occasional"
+    work_travel: "yes"
+    laundry_frequency: "weekly"
+  travel_frequency: "once a quarter"
+  religious_cultural_notes: ""
+
+budget:
+  monthly_clothing_budget_usd: 250
+  cost_per_wear_target: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference notes — informational only. These are YAML comments and are NOT
+# loaded into the profile DB (bootstrap_profile only reads the sections above).
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# STYLE CORE
+#   minimalist, smart-casual, elevated-casual, soft-structure,
+#   European minimalist, feminine through silhouette, not formal,
+#   not trend-driven, neutral-heavy, layering required
+#
+# OUTFIT GOALS
+#   look polished, look mature, not overdressed, versatile capsule,
+#   reduce random purchases, 30-day rotation, European smart-casual,
+#   low visual clutter
+#
+# BODY PREFERENCES (detail)
+#   waist definition required, fitted top + relaxed bottom,
+#   high-rise OK, straight-leg preferred, full-length preferred,
+#   soft drape preferred, tops mostly tucked
+#
+# FABRICS PREFERRED
+#   cotton, cotton-blend, washable-silk, soft-jersey, fine-knit,
+#   rib-knit, lightweight-merino, low-wrinkle-blend
+#
+# SHOE PROFILE
+#   sneaker-friendly, Chelsea boots approved, loafers approved,
+#   walkable only, low heel preferred
+#
+# ACCESSORY PROFILE
+#   silver hardware, minimal jewelry, small hoops, simple chain,
+#   slim belt, low embellishment
+#
+# DISLIKED CLOTHING TYPES
+#   weekday dresses, skirts for daily use, overly revealing items,
+#   business formal, loud statement pieces
+#
+# PURCHASING RULES
+#   must layer well; must work with black bottoms and charcoal;
+#   must be travel-compatible; must be low-maintenance;
+#   must flatter waist; must support capsule coordination

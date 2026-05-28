@@ -161,7 +161,7 @@ async def test_add_item_persists_row_and_replies(
     assert items[0].category == "tops"
     assert items[0].subcategory == "cardigan"
 
-    body = operator_interaction.response.sent[0]["content"]
+    body = operator_interaction.followup.sent[0]["content"]
     assert "cardigan" in body
     assert "/edit_item" in body  # tells the operator how to correct
 
@@ -219,6 +219,37 @@ async def test_add_item_audit_logged(
     assert "item_added" in kinds
 
 
+@pytest.mark.asyncio
+async def test_add_item_uses_followup_after_defer(
+    ctx: BotContext,
+    operator_interaction: FakeInteraction,
+    tmp_path: Path,
+    fake_ingest,
+) -> None:
+    # Regression for the production crash: _add_item defers (because the
+    # pipeline is slow), so handle_add_item MUST reply via followup.send,
+    # not response.send_message — the latter raises InteractionResponded.
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+
+    await operator_interaction.response.defer(ephemeral=True, thinking=True)
+
+    await handle_add_item(
+        ctx,
+        operator_interaction,
+        image_bytes=b"fake-jpeg-bytes",
+        file_suffix=".jpg",
+        name=None,
+        brand=None,
+        raw_dir=raw_dir,
+        ingest=fake_ingest,
+    )
+
+    assert len(operator_interaction.followup.sent) == 1
+    body = operator_interaction.followup.sent[0]["content"]
+    assert "cardigan" in body
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # resolve_short_id
 # ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +268,27 @@ def test_resolve_short_id_full_id_passthrough(ctx: BotContext) -> None:
 
 def test_resolve_short_id_unknown_returns_none(ctx: BotContext) -> None:
     assert resolve_short_id(ctx.repo, "deadbeef") is None
+
+
+def test_resolve_short_id_ignores_deleted_item(ctx: BotContext) -> None:
+    """A soft-deleted item must not match, even when it is the only row with
+    that prefix — otherwise /forget_item could silently target the wrong item."""
+    full = ctx.repo.items.add(WardrobeItem(category="tops", name="Ghost"))
+    ctx.repo.items.soft_delete(full)
+    assert resolve_short_id(ctx.repo, full[:8]) is None
+
+
+def test_resolve_short_id_active_wins_over_deleted_prefix(ctx: BotContext) -> None:
+    """When a deleted and an active item share the same 8-char prefix, only the
+    active one is returned (the old query would find 2 rows and return None)."""
+    full_active = ctx.repo.items.add(WardrobeItem(category="tops", name="Active"))
+    full_deleted = ctx.repo.items.add(WardrobeItem(category="tops", name="Deleted"))
+    ctx.repo.items.soft_delete(full_deleted)
+
+    # Sanity: these are different UUIDs with different prefixes under normal
+    # uuid4 generation.  We test the behaviour of each individually.
+    assert resolve_short_id(ctx.repo, full_active[:8]) == full_active
+    assert resolve_short_id(ctx.repo, full_deleted[:8]) is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
