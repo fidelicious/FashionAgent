@@ -1,3 +1,7 @@
+## --- Config ---
+config/clawbot.yaml
+config/profile.bootstrap.yaml
+
 # --- Secrets ---
 secrets/.env
 secrets/*.key
