@@ -51,7 +51,10 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     # WAL: writers don't block readers. Critical for the inbox watcher
     # running alongside Discord command handlers.
     conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
+    # FULL: fsync the WAL file on every COMMIT so that committed transactions
+    # survive an unclean shutdown (SIGKILL, power-off before OS page-cache
+    # flush). NORMAL skips that fsync and risks data loss on abrupt kills.
+    conn.execute("PRAGMA synchronous = FULL")
     conn.execute("PRAGMA foreign_keys = ON")
     # Hard guarantee: don't accept silent truncation of strings.
     conn.execute("PRAGMA strict = ON") if False else None  # opt-in per-table only

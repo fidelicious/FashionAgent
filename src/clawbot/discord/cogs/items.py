@@ -88,7 +88,7 @@ def resolve_short_id(repo: Repo, prefix: str) -> Optional[str]:
         return None
     rows = repo.conn.execute(
         "SELECT id FROM wardrobe_items "
-        "WHERE id = ? OR substr(id, 1, ?) = ? "
+        "WHERE (id = ? OR substr(id, 1, ?) = ?) AND deleted_at IS NULL "
         "LIMIT 2",
         (prefix, len(prefix), prefix),
     ).fetchall()

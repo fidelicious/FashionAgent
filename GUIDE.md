@@ -260,6 +260,23 @@ retailer screenshot. Example:
 
 Use /edit_item a1b2c3d4 <field> <value> to correct anything.
 ```
+# List all items
+``` sqlite
+sqlite3 ~/FashionAgent/db/clawbot.db \
+  "SELECT id, category, subcategory, color_primary, formality FROM wardrobe_items WHERE deleted_at IS NULL;"
+```
+
+# Edit a single field — e.g. fix formality
+``` sqlite
+sqlite3 ~/FashionAgent/db/clawbot.db \
+  "UPDATE wardrobe_items SET formality = 'smart-casual' WHERE id = 'your-item-id';"
+```
+
+# See full row for one item
+``` sqlite
+sqlite3 ~/FashionAgent/db/clawbot.db \
+  "SELECT * FROM wardrobe_items WHERE id = 'your-item-id';"
+```
 
 ### Correct or rename the item
 
