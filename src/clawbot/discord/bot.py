@@ -39,6 +39,8 @@ class _HasSendMessage(Protocol):
         *,
         ephemeral: bool = ...,
         embed: Any = ...,
+        file: Any = ...,
+        files: Any = ...,
     ) -> None: ...
 
     async def defer(
@@ -53,6 +55,8 @@ class _HasFollowupSend(Protocol):
         *,
         ephemeral: bool = ...,
         embed: Any = ...,
+        file: Any = ...,
+        files: Any = ...,
     ) -> None: ...
 
 

@@ -61,11 +61,10 @@ LAN-only. No public exposure.
 Personal project. Not licensed for redistribution.
 
 ## TODO
-- when running /wardrobe, /edit, /forget_item, and also during the daily outfit message: output the image as well not just the database information on the item.
-
 - Add all data to NUC
 
 - Change daily outfit msg to 8pm
 
+
+
 ## Known bugs
-- after a wardrobe item was removed via /forget_item, post reboot of the NUC, it came back when running /wardrobe

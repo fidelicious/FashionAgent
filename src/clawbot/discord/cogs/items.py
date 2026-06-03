@@ -23,11 +23,15 @@ from typing import Any, Callable, Optional
 import discord
 from discord import app_commands
 
-from clawbot.db.repo import PROFILE_FIELDS  # noqa: F401  (kept for grep parity)
-from clawbot.db.repo import Repo, WardrobeItem, _ITEM_COL_MAP
+from clawbot.db.repo import (
+    _ITEM_COL_MAP,
+    PROFILE_FIELDS,  # noqa: F401  (kept for grep parity)
+    Repo,
+    WardrobeItem,
+)
 from clawbot.discord.bot import BotContext, InteractionLike
+from clawbot.discord.images import build_item_files
 from clawbot.vision.draft import DraftItem
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DraftItem → WardrobeItem mapping
@@ -257,9 +261,13 @@ async def handle_edit_item(
         message=f"{resolved} {field}",
     )
 
+    # Attach the item's photo (if any) so the operator sees what they edited.
+    item = ctx.repo.items.get(resolved)
+    files = build_item_files([item], cap=1) if item is not None else []
     await interaction.response.send_message(
         f"✓ `[{resolved[:8]}]` `{field}` → `{coerced}`",
         ephemeral=True,
+        files=files,
     )
 
 
@@ -283,6 +291,11 @@ async def handle_forget_item(
         )
         return
 
+    # Resolve the photo *before* soft-deleting — afterwards the active-only
+    # ``get`` returns None — so the confirmation can show what was hidden.
+    item = ctx.repo.items.get(resolved)
+    files = build_item_files([item], cap=1) if item is not None else []
+
     ctx.repo.items.soft_delete(resolved)
     ctx.repo.audit.write(
         kind="item_forgotten",
@@ -294,6 +307,7 @@ async def handle_forget_item(
         f"✓ Forgot `[{resolved[:8]}]`. It's hidden from recommendations but "
         f"still in the DB.",
         ephemeral=True,
+        files=files,
     )
 
 
