@@ -45,7 +45,7 @@ None.
 
 ## /wardrobe
 
-List the items currently in your wardrobe. Shows up to 25 items per call. Use the `category` filter to page through larger wardrobes.
+List the items currently in your wardrobe. Shows up to 25 items per call. Use the `category` filter to page through larger wardrobes. Each listed item's photo is attached (up to Discord's limit of 10 per message — the first 10 items get photos; the text list still shows all 25). Items without a stored image are listed text-only.
 
 **Usage**
 ```
@@ -126,7 +126,7 @@ Add a new clothing item by uploading a photo. The bot runs the image through the
 
 ## /edit_item
 
-Update a single field on an existing item. Use `/wardrobe` first to find the item's short ID.
+Update a single field on an existing item. Use `/wardrobe` first to find the item's short ID. The confirmation reply includes the item's photo (if one is stored) so you can see what you changed.
 
 **Usage**
 ```
@@ -188,7 +188,7 @@ Update a single field on an existing item. Use `/wardrobe` first to find the ite
 
 ## /forget_item
 
-Hide an item from outfit recommendations. This is a **soft delete** — the item is not permanently removed from the database and can be restored if needed.
+Hide an item from outfit recommendations. This is a **soft delete** — the item is not permanently removed from the database and can be restored if needed. The confirmation reply includes the item's photo (if one is stored) so you can confirm you hid the right one.
 
 **Usage**
 ```

@@ -27,7 +27,6 @@ from clawbot.vision.draft import ClassificationResult, DraftItem, OcrResult
 
 from .conftest import FakeInteraction
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,6 +315,39 @@ async def test_edit_item_updates_field(
 
 
 @pytest.mark.asyncio
+async def test_edit_item_attaches_item_photo(
+    ctx: BotContext, operator_interaction: FakeInteraction, tmp_path: Path
+) -> None:
+    """The edit confirmation carries the affected item's photo when it has one."""
+    img = tmp_path / "edit.jpg"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    item_id = ctx.repo.items.add(
+        WardrobeItem(category="tops", name="Tee", image_raw_path=str(img))
+    )
+
+    await handle_edit_item(
+        ctx, operator_interaction, item_id=item_id[:8], field="name", value="New"
+    )
+
+    sent = operator_interaction.response.sent[0]
+    assert sent["file"] is not None or sent["files"]
+
+
+@pytest.mark.asyncio
+async def test_edit_item_without_image_sends_text_only(
+    ctx: BotContext, operator_interaction: FakeInteraction
+) -> None:
+    item_id = ctx.repo.items.add(WardrobeItem(category="tops", name="Tee"))
+    await handle_edit_item(
+        ctx, operator_interaction, item_id=item_id[:8], field="name", value="New"
+    )
+    sent = operator_interaction.response.sent[0]
+    assert sent["file"] is None
+    assert not sent["files"]
+    assert "New" in sent["content"]
+
+
+@pytest.mark.asyncio
 async def test_edit_item_unknown_field_errors(
     ctx: BotContext, operator_interaction: FakeInteraction
 ) -> None:
@@ -377,6 +409,23 @@ async def test_forget_item_soft_deletes(
     assert ctx.repo.items.get(item_id) is None
     # but it's still there if we include_deleted
     assert ctx.repo.items.get(item_id, include_deleted=True) is not None
+
+
+@pytest.mark.asyncio
+async def test_forget_item_attaches_item_photo(
+    ctx: BotContext, operator_interaction: FakeInteraction, tmp_path: Path
+) -> None:
+    """The forget confirmation shows the item being hidden, photo included."""
+    img = tmp_path / "forget.jpg"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    item_id = ctx.repo.items.add(
+        WardrobeItem(category="tops", name="Tee", image_raw_path=str(img))
+    )
+
+    await handle_forget_item(ctx, operator_interaction, item_id=item_id[:8])
+
+    sent = operator_interaction.response.sent[0]
+    assert sent["file"] is not None or sent["files"]
 
 
 @pytest.mark.asyncio

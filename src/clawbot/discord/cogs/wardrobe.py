@@ -15,6 +15,7 @@ from discord import app_commands
 
 from clawbot.db.repo import WardrobeItem
 from clawbot.discord.bot import BotContext, InteractionLike
+from clawbot.discord.images import MAX_ATTACHMENTS, build_item_files
 from clawbot.vision.taxonomy import CATEGORY_PROMPTS
 
 # Discord's hard message-content limit is 2000 chars; one item line is ~60–80,
@@ -84,9 +85,15 @@ async def handle_wardrobe(
     *,
     category: Optional[str],
 ) -> None:
-    """Reply with a paginated list of wardrobe items, optionally filtered."""
+    """Reply with a paginated list of wardrobe items, optionally filtered.
+
+    Each listed item's photo is attached (up to Discord's 10-attachment
+    limit). The caller must have ``defer()``-ed first — uploading several
+    images can exceed Discord's 3s ack window — so every reply goes through
+    ``followup.send``.
+    """
     if category is not None and category not in VALID_CATEGORIES:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ Unknown category `{category}`. "
             f"Valid: {', '.join(sorted(VALID_CATEGORIES))}.",
             ephemeral=True,
@@ -101,7 +108,12 @@ async def handle_wardrobe(
     )
 
     body = render_wardrobe(items, total=total, category=category)
-    await interaction.response.send_message(body, ephemeral=True)
+    files = build_item_files(items, cap=MAX_ATTACHMENTS)
+    # Photos are capped well below the text page size, so signal when the
+    # list shows more items than we could attach photos for.
+    if len(items) > MAX_ATTACHMENTS and files:
+        body += f"\n\n_(photos shown for the first {MAX_ATTACHMENTS} items)_"
+    await interaction.followup.send(body, ephemeral=True, files=files)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,4 +134,7 @@ async def setup(bot: Any) -> None:
         interaction: discord.Interaction,
         category: Optional[str] = None,
     ) -> None:  # type: ignore[misc]
+        # Defer first: building + uploading up to 10 photos can exceed
+        # Discord's 3s initial-response deadline.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         await handle_wardrobe(ctx, interaction, category=category)

@@ -76,6 +76,8 @@ class FakeResponse:
         *,
         ephemeral: bool = False,
         embed: Any = None,
+        file: Any = None,
+        files: Any = None,
     ) -> None:
         if self._responded:
             raise InteractionRespondedError(
@@ -84,7 +86,13 @@ class FakeResponse:
             )
         self._responded = True
         self.sent.append(
-            {"content": content, "ephemeral": ephemeral, "embed": embed}
+            {
+                "content": content,
+                "ephemeral": ephemeral,
+                "embed": embed,
+                "file": file,
+                "files": files,
+            }
         )
 
 
@@ -104,9 +112,17 @@ class FakeFollowup:
         *,
         ephemeral: bool = False,
         embed: Any = None,
+        file: Any = None,
+        files: Any = None,
     ) -> None:
         self.sent.append(
-            {"content": content, "ephemeral": ephemeral, "embed": embed}
+            {
+                "content": content,
+                "ephemeral": ephemeral,
+                "embed": embed,
+                "file": file,
+                "files": files,
+            }
         )
 
 
