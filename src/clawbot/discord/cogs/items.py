@@ -147,7 +147,20 @@ async def handle_add_item(
 
         ingest = ingest_image
 
-    draft = ingest(raw_path, source="upload", config=ctx.config)
+    try:
+        draft = ingest(raw_path, source="upload", config=ctx.config)
+    except Exception as exc:
+        # Surface the failure to the operator instead of leaving the deferred
+        # interaction hanging until Discord times it out. Common causes:
+        # unsupported image format (e.g. HEIC without pillow-heif installed),
+        # rembg/ONNX runtime error, or a corrupt file.
+        await interaction.followup.send(
+            f"⚠️ Could not process image: {exc}\n"
+            "Supported formats: JPEG, PNG, WEBP, HEIC (requires [vision] extra).",
+            ephemeral=True,
+        )
+        return
+
     item = build_item_from_draft(draft, brand=brand, name=name)
     item_id = ctx.repo.items.add(item)
 

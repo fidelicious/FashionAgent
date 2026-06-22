@@ -20,6 +20,15 @@ from PIL import Image
 from clawbot.config import ClawbotConfig
 from clawbot.vision import models
 
+# Register HEIC/HEIF support when pillow-heif is installed (part of the
+# [vision] extra). Without this, iPhone .heic photos raise
+# PIL.UnidentifiedImageError at the first Image.open() call.
+try:
+    import pillow_heif  # type: ignore[import-untyped]
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
+
 
 def remove_background(raw_path: Path, config: ClawbotConfig) -> Path:
     """Remove the background from ``raw_path`` and return the cutout path.
