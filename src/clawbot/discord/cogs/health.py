@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import discord
+from discord import app_commands
 
 from clawbot.discord.bot import BotContext, InteractionLike
 
@@ -212,10 +213,107 @@ async def handle_health(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+async def handle_run_outfit(
+    ctx: BotContext,
+    interaction: InteractionLike,
+    *,
+    bot: Any,
+    occasion: str = "casual",
+    _run_fn: Any = None,
+    _notifier: Any = None,
+    _collage_dir: Optional[Path] = None,
+) -> None:
+    """Trigger the daily outfit pipeline immediately and reply with a summary.
+
+    Posts the collage to the configured Discord channel (same path as the
+    07:00 cron) and sends the operator an ephemeral confirmation with the
+    score and fallback flag.
+
+    ``_run_fn`` and ``_notifier`` are test-injection points; production code
+    leaves them None and the real implementations are used.
+    """
+    from clawbot.inbox.notify import ChannelNotifier, NullNotifier
+    from clawbot.outfits.daily import run_daily_outfit
+    from clawbot.outfits.llm import OllamaConfig
+
+    if _notifier is None:
+        _notifier = (
+            ChannelNotifier(bot=bot, channel_id=ctx.secrets.channel_id)
+            if ctx.secrets.channel_id
+            else NullNotifier()
+        )
+    if _run_fn is None:
+        _run_fn = run_daily_outfit
+
+    collage_dir = _collage_dir or Path(ctx.config.paths.images_dir) / "outfits"
+    collage_dir.mkdir(parents=True, exist_ok=True)
+    ollama = OllamaConfig(
+        base_url=ctx.config.models.ollama_base_url,
+        model=ctx.config.models.llm,
+        timeout_seconds=ctx.config.models.llm_timeout_seconds,
+        max_retries=ctx.config.models.llm_max_retries,
+    )
+
+    try:
+        result = await _run_fn(
+            repo=ctx.repo,
+            notifier=_notifier,
+            collage_dir=collage_dir,
+            occasion=occasion,
+            ollama_config=ollama,
+        )
+    except Exception as exc:
+        logger.exception("run_outfit triggered manually but failed: %s", exc)
+        await interaction.followup.send(
+            f"\u26a0\ufe0f Daily outfit run failed: {exc}", ephemeral=True
+        )
+        return
+
+    if result.outfit_id is None:
+        await interaction.followup.send(
+            "\u26a0\ufe0f No outfit generated — check wardrobe or season/occasion.",
+            ephemeral=True,
+        )
+    else:
+        fallback = " (LLM fallback used)" if result.fallback_used else ""
+        await interaction.followup.send(
+            f"\u2705 Outfit posted to channel.\n"
+            f"  score: `{result.score:.2f}` · season: `{result.season}`"
+            f" · occasion: `{result.occasion}`{fallback}",
+            ephemeral=True,
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cog wiring — only imported when discord.py is available.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 async def setup(bot: Any) -> None:
-    """discord.py extension entrypoint. Adds the /health command to the tree."""
+    """discord.py extension entrypoint. Adds the /health and /run_outfit commands."""
     ctx: BotContext = bot.clawbot_ctx
 
     @bot.tree.command(name="health", description="Show bot health status.")
     async def _health(interaction: discord.Interaction) -> None:  # type: ignore[misc]
         await handle_health(ctx, interaction)
+
+    @bot.tree.command(
+        name="run_outfit",
+        description="Trigger today's outfit push immediately (operator only).",
+    )
+    @app_commands.describe(
+        occasion="Occasion to dress for (default: casual)",
+    )
+    @app_commands.choices(occasion=[
+        app_commands.Choice(name="casual", value="casual"),
+        app_commands.Choice(name="smart-casual", value="smart-casual"),
+        app_commands.Choice(name="business", value="business"),
+        app_commands.Choice(name="formal", value="formal"),
+    ])
+    async def _run_outfit(
+        interaction: discord.Interaction,
+        occasion: str = "casual",
+    ) -> None:  # type: ignore[misc]
+        # Defer because the LLM + Pillow pipeline takes 10-60s.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await handle_run_outfit(ctx, interaction, bot=bot, occasion=occasion)

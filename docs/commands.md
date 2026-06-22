@@ -13,6 +13,7 @@ All commands are Discord slash commands. Type `/` in any channel the bot has acc
 - [/forget_item](#forget_item)
 - [/profile show](#profile-show)
 - [/profile set](#profile-set)
+- [/run_outfit](#run_outfit)
 
 ---
 
@@ -335,3 +336,46 @@ Update a single field in your style profile.
 /profile set field: comfort_vs_style value: 6
 ```
 > ✓ Set `comfort_vs_style` to `6`.
+
+## /run_outfit
+
+Trigger today's outfit push immediately without waiting for the scheduled time. The collage is posted to your Discord channel exactly as the daily cron job would. Use this to test the pipeline, preview an outfit for tonight, or recover a missed push.
+
+**Usage**
+```
+/run_outfit [occasion: <occasion>]
+```
+
+**Parameters**
+| Parameter | Required | Description |
+|---|---|---|
+| `occasion` | Optional | Occasion to dress for. Defaults to `casual`. |
+
+**Valid occasions**
+| Value |
+|---|
+| `casual` |
+| `smart-casual` |
+| `business` |
+| `formal` |
+
+**What it does**
+1. Scores all active wardrobe items for today's season + the chosen occasion.
+2. Sends the top candidates to Gemma 3 1B (Ollama) for the final pick and one-sentence reason.
+3. Renders a 2×2 Pillow collage and posts it to your Discord channel.
+4. Replies ephemerally with the score, season, and occasion used.
+
+**Example**
+```
+/run_outfit
+```
+> ✅ Outfit posted to channel.
+>   score: `0.84` · season: `summer` · occasion: `casual`
+
+```
+/run_outfit occasion: business
+```
+> ✅ Outfit posted to channel.
+>   score: `0.79` · season: `summer` · occasion: `business`
+
+**Tip:** If Ollama is unreachable the LLM falls back to the top-scored candidate automatically — the command will still complete and note `(LLM fallback used)` in the reply.
