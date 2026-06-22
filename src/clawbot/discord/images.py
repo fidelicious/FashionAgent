@@ -32,13 +32,18 @@ logger = logging.getLogger(__name__)
 # Discord accepts at most 10 attachments on a single message.
 MAX_ATTACHMENTS = 10
 
+# Formats Discord renders as inline image previews. HEIC/HEIF are not in this
+# set — Discord treats them as generic file downloads with no thumbnail.
+_DISCORD_RENDERABLE = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
+
 
 def select_item_image(item: WardrobeItem) -> Optional[Path]:
     """Return the best on-disk image for ``item``, or None if it has none.
 
     Tries the raw upload first, then the cutout, then the final render, and
-    returns the first path whose file actually exists on disk. A path that is
-    set in the DB but missing from the filesystem is skipped (not an error).
+    returns the first path whose file actually exists on disk AND whose format
+    Discord can render as an inline preview. Non-renderable formats (e.g.
+    .heic) are skipped so the pipeline's PNG cutout is used instead.
     """
     for candidate in (
         item.image_raw_path,
@@ -48,7 +53,7 @@ def select_item_image(item: WardrobeItem) -> Optional[Path]:
         if not candidate:
             continue
         path = Path(candidate)
-        if path.is_file():
+        if path.is_file() and path.suffix.lower() in _DISCORD_RENDERABLE:
             return path
     return None
 
