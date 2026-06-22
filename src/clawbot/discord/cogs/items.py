@@ -16,9 +16,12 @@ V1 design notes (decided in build-Step-7 planning):
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 import discord
 from discord import app_commands
@@ -154,6 +157,12 @@ async def handle_add_item(
         # interaction hanging until Discord times it out. Common causes:
         # unsupported image format (e.g. HEIC without pillow-heif installed),
         # rembg/ONNX runtime error, or a corrupt file.
+        logger.exception(
+            "add_item pipeline failed for %s (suffix=%s): %s",
+            raw_path.name,
+            file_suffix,
+            exc,
+        )
         await interaction.followup.send(
             f"⚠️ Could not process image: {exc}\n"
             "Supported formats: JPEG, PNG, WEBP, HEIC (requires [vision] extra).",
@@ -176,7 +185,11 @@ async def handle_add_item(
 
     short = item_id[:8]
     summary = _format_add_reply(item, short_id=short)
-    await interaction.followup.send(summary, ephemeral=True)
+    # Attach the background-removed cutout so the operator can see what the
+    # pipeline produced inline in Discord (the cutout is always a PNG, so it
+    # renders as an image preview regardless of the original upload format).
+    files = build_item_files([item], cap=1)
+    await interaction.followup.send(summary, files=files, ephemeral=True)
 
 
 def _format_add_reply(item: WardrobeItem, *, short_id: str) -> str:
