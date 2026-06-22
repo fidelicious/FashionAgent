@@ -76,6 +76,31 @@ def test_select_returns_none_when_paths_set_but_files_absent(tmp_path: Path) -> 
     assert select_item_image(item) is None
 
 
+def test_select_skips_heic_raw_and_returns_png_cutout(tmp_path: Path) -> None:
+    """HEIC files are not renderable by Discord — the cutout PNG must be
+    returned even when the raw HEIC file exists on disk."""
+    heic_raw = _img(tmp_path, "raw.heic")
+    png_cut = _img(tmp_path, "cut.png")
+    item = WardrobeItem(
+        category="tops",
+        image_raw_path=str(heic_raw),
+        image_cutout_path=str(png_cut),
+    )
+    assert select_item_image(item) == png_cut
+
+
+def test_select_skips_heif_raw_and_returns_png_cutout(tmp_path: Path) -> None:
+    """Same guard for the .heif extension variant."""
+    heif_raw = _img(tmp_path, "raw.heif")
+    png_cut = _img(tmp_path, "cut.png")
+    item = WardrobeItem(
+        category="tops",
+        image_raw_path=str(heif_raw),
+        image_cutout_path=str(png_cut),
+    )
+    assert select_item_image(item) == png_cut
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # build_item_files — cap, skip-missing, identifying filename
 # ─────────────────────────────────────────────────────────────────────────────
