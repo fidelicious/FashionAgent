@@ -59,3 +59,12 @@ LAN-only. No public exposure.
 ## License
 
 Personal project. Not licensed for redistribution.
+
+## TODO
+- Add all data to NUC
+
+- Change daily outfit msg to 8pm
+
+
+
+## Known bugs

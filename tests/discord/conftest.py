@@ -30,8 +30,18 @@ _MIGRATIONS_DIR = (
 #
 # discord.Interaction is huge and instantiating one means dragging in the whole
 # gateway. For unit tests we only need: user.id, response.send_message(),
-# followup.send(). The fakes below mimic the duck-typed surface we use.
+# response.defer(), followup.send(). The fakes below mimic the duck-typed
+# surface we use AND enforce Discord's one-initial-response rule so we catch
+# defer/send_message ordering bugs in CI instead of in production.
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+class InteractionRespondedError(RuntimeError):
+    """Mirror of discord.errors.InteractionResponded for test assertions.
+
+    We define our own so the fakes don't have to import the real exception
+    (which pulls in discord.py's full gateway machinery just to construct).
+    """
 
 
 @dataclass
@@ -42,7 +52,23 @@ class FakeUser:
 
 @dataclass
 class FakeResponse:
+    """The initial-response channel — at most one call allowed.
+
+    In real discord.py, ``defer()`` and ``send_message()`` both consume the
+    interaction's initial response. After either is called, the other (or a
+    second of either) raises ``InteractionResponded``. Anything else must go
+    through ``followup.send``.
+    """
+
     sent: list[dict[str, Any]] = field(default_factory=list)
+    _responded: bool = False
+
+    async def defer(self, *, ephemeral: bool = False, thinking: bool = False) -> None:
+        if self._responded:
+            raise InteractionRespondedError(
+                "defer() after interaction already responded to"
+            )
+        self._responded = True
 
     async def send_message(
         self,
@@ -50,9 +76,53 @@ class FakeResponse:
         *,
         ephemeral: bool = False,
         embed: Any = None,
+        file: Any = None,
+        files: Any = None,
+    ) -> None:
+        if self._responded:
+            raise InteractionRespondedError(
+                "send_message() after interaction already responded to — "
+                "use interaction.followup.send instead"
+            )
+        self._responded = True
+        self.sent.append(
+            {
+                "content": content,
+                "ephemeral": ephemeral,
+                "embed": embed,
+                "file": file,
+                "files": files,
+            }
+        )
+
+
+@dataclass
+class FakeFollowup:
+    """The followup channel — always available, no one-shot guard.
+
+    In real discord.py this is a webhook with a 15-minute window. We don't
+    model the time bound; we just capture sent payloads for assertions.
+    """
+
+    sent: list[dict[str, Any]] = field(default_factory=list)
+
+    async def send(
+        self,
+        content: Optional[str] = None,
+        *,
+        ephemeral: bool = False,
+        embed: Any = None,
+        file: Any = None,
+        files: Any = None,
     ) -> None:
         self.sent.append(
-            {"content": content, "ephemeral": ephemeral, "embed": embed}
+            {
+                "content": content,
+                "ephemeral": ephemeral,
+                "embed": embed,
+                "file": file,
+                "files": files,
+            }
         )
 
 
@@ -60,6 +130,7 @@ class FakeResponse:
 class FakeInteraction:
     user: FakeUser
     response: FakeResponse = field(default_factory=FakeResponse)
+    followup: FakeFollowup = field(default_factory=FakeFollowup)
     guild_id: Optional[int] = None
 
 

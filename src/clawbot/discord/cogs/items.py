@@ -16,18 +16,25 @@ V1 design notes (decided in build-Step-7 planning):
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+logger = logging.getLogger(__name__)
+
 import discord
 from discord import app_commands
 
-from clawbot.db.repo import PROFILE_FIELDS  # noqa: F401  (kept for grep parity)
-from clawbot.db.repo import Repo, WardrobeItem, _ITEM_COL_MAP
+from clawbot.db.repo import (
+    _ITEM_COL_MAP,
+    PROFILE_FIELDS,  # noqa: F401  (kept for grep parity)
+    Repo,
+    WardrobeItem,
+)
 from clawbot.discord.bot import BotContext, InteractionLike
+from clawbot.discord.images import build_item_files
 from clawbot.vision.draft import DraftItem
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DraftItem → WardrobeItem mapping
@@ -88,7 +95,7 @@ def resolve_short_id(repo: Repo, prefix: str) -> Optional[str]:
         return None
     rows = repo.conn.execute(
         "SELECT id FROM wardrobe_items "
-        "WHERE id = ? OR substr(id, 1, ?) = ? "
+        "WHERE (id = ? OR substr(id, 1, ?) = ?) AND deleted_at IS NULL "
         "LIMIT 2",
         (prefix, len(prefix), prefix),
     ).fetchall()
@@ -123,7 +130,12 @@ async def handle_add_item(
         2. Run ``ingest(raw_path, source='upload', config=ctx.config)``.
         3. Build a WardrobeItem from the draft + operator hints.
         4. Insert; write the 512-d embedding into wardrobe_items_vec.
-        5. Audit-log; reply ephemerally with the new short id + summary.
+        5. Audit-log; reply ephemerally via ``followup.send``.
+
+    The reply goes through ``followup.send`` (not ``response.send_message``)
+    because the slash-command wrapper defers the interaction first — the
+    pipeline can take 10–30s and Discord expires unacknowledged interactions
+    after 3s. After ``defer()``, the initial response is already consumed.
     """
     raw_dir = raw_dir or (ctx.config.paths.images_dir / "raw")
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -138,7 +150,26 @@ async def handle_add_item(
 
         ingest = ingest_image
 
-    draft = ingest(raw_path, source="upload", config=ctx.config)
+    try:
+        draft = ingest(raw_path, source="upload", config=ctx.config)
+    except Exception as exc:
+        # Surface the failure to the operator instead of leaving the deferred
+        # interaction hanging until Discord times it out. Common causes:
+        # unsupported image format (e.g. HEIC without pillow-heif installed),
+        # rembg/ONNX runtime error, or a corrupt file.
+        logger.exception(
+            "add_item pipeline failed for %s (suffix=%s): %s",
+            raw_path.name,
+            file_suffix,
+            exc,
+        )
+        await interaction.followup.send(
+            f"⚠️ Could not process image: {exc}\n"
+            "Supported formats: JPEG, PNG, WEBP, HEIC (requires [vision] extra).",
+            ephemeral=True,
+        )
+        return
+
     item = build_item_from_draft(draft, brand=brand, name=name)
     item_id = ctx.repo.items.add(item)
 
@@ -154,7 +185,11 @@ async def handle_add_item(
 
     short = item_id[:8]
     summary = _format_add_reply(item, short_id=short)
-    await interaction.response.send_message(summary, ephemeral=True)
+    # Attach the background-removed cutout so the operator can see what the
+    # pipeline produced inline in Discord (the cutout is always a PNG, so it
+    # renders as an image preview regardless of the original upload format).
+    files = build_item_files([item], cap=1)
+    await interaction.followup.send(summary, files=files, ephemeral=True)
 
 
 def _format_add_reply(item: WardrobeItem, *, short_id: str) -> str:
@@ -252,9 +287,13 @@ async def handle_edit_item(
         message=f"{resolved} {field}",
     )
 
+    # Attach the item's photo (if any) so the operator sees what they edited.
+    item = ctx.repo.items.get(resolved)
+    files = build_item_files([item], cap=1) if item is not None else []
     await interaction.response.send_message(
         f"✓ `[{resolved[:8]}]` `{field}` → `{coerced}`",
         ephemeral=True,
+        files=files,
     )
 
 
@@ -278,6 +317,11 @@ async def handle_forget_item(
         )
         return
 
+    # Resolve the photo *before* soft-deleting — afterwards the active-only
+    # ``get`` returns None — so the confirmation can show what was hidden.
+    item = ctx.repo.items.get(resolved)
+    files = build_item_files([item], cap=1) if item is not None else []
+
     ctx.repo.items.soft_delete(resolved)
     ctx.repo.audit.write(
         kind="item_forgotten",
@@ -289,6 +333,7 @@ async def handle_forget_item(
         f"✓ Forgot `[{resolved[:8]}]`. It's hidden from recommendations but "
         f"still in the DB.",
         ephemeral=True,
+        files=files,
     )
 
 

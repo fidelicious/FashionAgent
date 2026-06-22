@@ -78,6 +78,13 @@ async def _run_bot(ctx: BotContext, secrets: DiscordSecrets) -> None:
 
     bot = build_bot(ctx)
 
+    # Forward SIGTERM (sent by Docker / tini on container stop) to a graceful
+    # bot shutdown so the event loop exits cleanly. Without this, Python's
+    # default SIGTERM handler kills the process immediately — skipping all
+    # cleanup, including the database connection close that checkpoints the WAL.
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(bot.close()))
+
     async def _setup_hook() -> None:
         for module in _COG_MODULES:
             await bot.load_extension(module)
@@ -141,7 +148,15 @@ def main() -> None:
     ctx = BotContext(repo=Repo(conn=conn), config=cfg, secrets=secrets)
 
     logger.info("Starting Discord bot.")
-    asyncio.run(_run_bot(ctx, secrets))
+    try:
+        asyncio.run(_run_bot(ctx, secrets))
+    finally:
+        # Checkpoint the WAL into the main DB file so that all committed
+        # changes survive even if the WAL file is later lost or corrupted.
+        # This is the last line of defence against data loss on shutdown.
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        logger.info("Database connection closed.")
 
 
 if __name__ == "__main__":

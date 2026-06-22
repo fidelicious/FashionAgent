@@ -30,6 +30,7 @@ dependencies = [
 vision = [
     "rembg[cpu]>=2.0.57",
     "Pillow>=10.3",
+    "pillow-heif>=0.13",            # HEIC/HEIF support (iPhone photos)
     "colorthief>=0.2.1",
     "transformers>=4.40",           # Fashion-CLIP loads via this lib
     "torch>=2.2,<3",
