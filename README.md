@@ -56,6 +56,20 @@ inbox/email/    ──► │       │ HTTP                      │
 
 LAN-only. No public exposure.
 
+## How to Rebuild every time there is code change
+
+### 1. Get the merged code
+git checkout master
+git pull
+
+### 2. Rebuild + restart the clawbot container (code is baked into the image)
+docker compose -f docker/docker-compose.yml build clawbot
+docker compose -f docker/docker-compose.yml up -d clawbot
+
+### 3. Confirm it came up cleanly
+docker compose -f docker/docker-compose.yml logs -f clawbot | grep -E "Synced|Scheduler"
+
+
 ## License
 
 Personal project. Not licensed for redistribution.
