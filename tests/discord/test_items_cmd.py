@@ -249,6 +249,41 @@ async def test_add_item_uses_followup_after_defer(
     assert "cardigan" in body
 
 
+@pytest.mark.asyncio
+async def test_add_item_pipeline_failure_replies_with_error(
+    ctx: BotContext,
+    operator_interaction: FakeInteraction,
+    tmp_path: Path,
+) -> None:
+    """When the pipeline raises (e.g. Pillow can't open HEIC without
+    pillow-heif), handle_add_item must send a followup error message instead
+    of leaving the deferred interaction hanging until Discord times it out.
+    """
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+
+    def _failing_ingest(raw_path, *, source, config):  # noqa: ANN001
+        raise ValueError("cannot identify image file (simulated HEIC failure)")
+
+    await handle_add_item(
+        ctx,
+        operator_interaction,
+        image_bytes=b"not-a-real-image",
+        file_suffix=".heic",
+        name=None,
+        brand=None,
+        raw_dir=raw_dir,
+        ingest=_failing_ingest,
+    )
+
+    assert len(operator_interaction.followup.sent) == 1
+    body = operator_interaction.followup.sent[0]["content"]
+    assert "⚠️" in body
+    assert "cannot identify image file" in body
+    # No item should have been persisted
+    assert ctx.repo.items.list_by_category() == []
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # resolve_short_id
 # ─────────────────────────────────────────────────────────────────────────────
