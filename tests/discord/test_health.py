@@ -21,6 +21,7 @@ from clawbot.discord.cogs.health import (
     HealthStatus,
     check_health,
     handle_health,
+    handle_run_outfit,
 )
 
 from .conftest import FakeInteraction
@@ -130,3 +131,104 @@ def test_health_report_status_aggregation() -> None:
     assert r1.status is HealthStatus.OK
     assert r2.status is HealthStatus.DEGRADED
     assert r3.status is HealthStatus.RED
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# handle_run_outfit
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_outfit_success_sends_ephemeral_confirmation(
+    ctx: BotContext, operator_interaction: FakeInteraction, tmp_path: Path
+) -> None:
+    """A successful run posts to the channel via the notifier and sends the
+    operator an ephemeral score summary."""
+    from clawbot.outfits.daily import DailyResult
+
+    posted: list[str] = []
+
+    class _FakeNotifier:
+        async def post(self, content: str) -> None:
+            posted.append(content)
+
+        async def post_image(self, content: str, image_path) -> None:
+            posted.append(content)
+
+    fake_result = DailyResult(
+        outfit_id="abc-123",
+        collage_path=None,
+        score=0.82,
+        occasion="casual",
+        season="summer",
+        fallback_used=False,
+    )
+
+    async def _fake_run(**kwargs):  # noqa: ANN001
+        return fake_result
+
+    # Defer first, as the real slash command would.
+    await operator_interaction.response.defer(ephemeral=True, thinking=True)
+    await handle_run_outfit(
+        ctx,
+        operator_interaction,
+        bot=None,  # not needed — we inject run_fn below
+        occasion="casual",
+        _run_fn=_fake_run,
+        _notifier=_FakeNotifier(),
+        _collage_dir=tmp_path,
+    )
+
+    body = operator_interaction.followup.sent[0]["content"]
+    assert "✅" in body
+    assert "0.82" in body
+
+
+@pytest.mark.asyncio
+async def test_run_outfit_empty_wardrobe_warns_operator(
+    ctx: BotContext, operator_interaction: FakeInteraction, tmp_path: Path
+) -> None:
+    from clawbot.outfits.daily import DailyResult
+
+    async def _fake_run(**kwargs):  # noqa: ANN001
+        return DailyResult(
+            outfit_id=None, collage_path=None, score=0.0,
+            occasion="casual", season="summer", fallback_used=False,
+        )
+
+    await operator_interaction.response.defer(ephemeral=True, thinking=True)
+    await handle_run_outfit(
+        ctx,
+        operator_interaction,
+        bot=None,
+        occasion="casual",
+        _run_fn=_fake_run,
+        _notifier=None,
+        _collage_dir=tmp_path,
+    )
+
+    body = operator_interaction.followup.sent[0]["content"]
+    assert "⚠️" in body
+
+
+@pytest.mark.asyncio
+async def test_run_outfit_pipeline_failure_replies_with_error(
+    ctx: BotContext, operator_interaction: FakeInteraction, tmp_path: Path
+) -> None:
+    async def _failing_run(**kwargs):  # noqa: ANN001
+        raise RuntimeError("ollama timeout")
+
+    await operator_interaction.response.defer(ephemeral=True, thinking=True)
+    await handle_run_outfit(
+        ctx,
+        operator_interaction,
+        bot=None,
+        occasion="casual",
+        _run_fn=_failing_run,
+        _notifier=None,
+        _collage_dir=tmp_path,
+    )
+
+    body = operator_interaction.followup.sent[0]["content"]
+    assert "⚠️" in body
+    assert "ollama timeout" in body
